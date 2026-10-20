@@ -1,0 +1,60 @@
+[package]
+name = "convtool-app"
+description = "변환툴 트레이 앱 (휠 클릭 트리거, 원형 메뉴 오버레이, 파이프 서버)"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "convtool_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "convtool-app"
+path = "src/main.rs"
+
+[features]
+default = ["tauri-app"]
+# tauri, tauri-build, tokio는 이 feature에만 묶는다.
+# `--no-default-features`로 windres·WebView2 없이 순수 모듈 테스트를 돌리기 위해서다.
+# tokio(1.5x)·tauri는 windows-sys 0.61(raw-dylib)을 끌어오므로 GNU 자체 포함 툴체인(as 없음)에서는
+# 링크가 실패한다. 그래서 순수 테스트 경로에는 넣지 않는다.
+tauri-app = ["dep:tauri", "dep:tauri-build", "dep:tokio"]
+
+[dependencies]
+convtool-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+# features는 워크스페이스 값(tray-icon)을 물려받는다. 여기서 tray-icon을 다시 적지 않는다:
+# tauri-build의 manifest 검사는 로컬 features와 tauri.conf.json(app.trayIcon)을 비교하는데,
+# 트레이는 코드에서 만들므로 config에 trayIcon이 없다.
+tauri = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+
+# windows 0.58은 windows-targets 0.52(가져온 import lib)를 쓴다. 워크스페이스의 0.61(windows-link,
+# raw-dylib)은 이 환경에서 test/build 링크가 실패하므로(dlltool → as 없음) 여기서 직접 버전을 적는다.
+# tauri 2.12가 쓰는 windows 0.62와는 HWND 원시 포인터(.0)로만 주고받는다.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_HiDpi",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_System_Ole",
+    "Win32_System_Variant",
+    "Win32_System_Threading",
+    "Win32_System_Registry",
+    "Win32_Security",
+] }
+
+[build-dependencies]
+tauri-build = { workspace = true, optional = true }

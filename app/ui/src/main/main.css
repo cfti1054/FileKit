@@ -1,0 +1,238 @@
+:root {
+  --font: "Segoe UI Variable", "Malgun Gothic", sans-serif;
+  --bg: #f6f6f6;
+  --surface: #ffffff;
+  --text: #1a1a1a;
+  --muted: #5c5c5c;
+  --border: #d0d0d0;
+  --accent: #0067c0;
+  --accent-text: #ffffff;
+  --danger: #b3261e;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #202020;
+    --surface: #2b2b2b;
+    --text: #f5f5f5;
+    --muted: #c4c4c4;
+    --border: #4a4a4a;
+    --accent: #4cc2ff;
+    --accent-text: #0b0b0b;
+    --danger: #ff9a93;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+.app-header h1 {
+  margin: 0;
+  font-size: 18px;
+}
+.tabs {
+  display: flex;
+  gap: 4px;
+}
+.tab {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.tab.is-selected {
+  background: var(--surface);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  font-weight: 700;
+}
+.app-body {
+  flex: 1;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.muted {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 140px;
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  text-align: center;
+}
+.dropzone.is-over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+}
+.dropzone.is-disabled {
+  opacity: 0.6;
+}
+.dropzone-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+.dropzone-sub {
+  margin: 0;
+  color: var(--muted);
+}
+
+.btn {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.btn:focus-visible,
+.format-btn:focus-visible,
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.notice {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.notice.is-error {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.format-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+.format-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.format-btn strong {
+  font-size: 17px;
+}
+.format-btn span {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.format-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+.format-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.preset {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 12px;
+}
+.preset select {
+  font: inherit;
+  padding: 3px 6px;
+}
+
+.jobs ul,
+.engines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.job {
+  display: grid;
+  grid-template-columns: 1fr 140px 64px auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.job progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.job-error {
+  grid-column: 1 / -1;
+  color: var(--danger);
+}
+.job-output {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.job.is-failed {
+  border-color: var(--danger);
+}
+
+.placeholder {
+  color: var(--text);
+}
+
+@media (forced-colors: active) {
+  .format-btn,
+  .dropzone,
+  .job,
+  .btn {
+    border-color: CanvasText;
+  }
+  .format-btn:disabled {
+    opacity: 1;
+    color: GrayText;
+    border-color: GrayText;
+  }
+}

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- 변환툴 앱 아이콘 원본. `tauri icon`으로 icons/*.png, icon.ico 등을 만든다. -->
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="#0067C0"/>
+  <!-- 위 화살표: 왼쪽 → 오른쪽 -->
+  <path d="M256 400 H680" stroke="#FFFFFF" stroke-width="88" stroke-linecap="round" fill="none"/>
+  <path d="M600 290 L740 400 L600 510" stroke="#FFFFFF" stroke-width="88" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  <!-- 아래 화살표: 오른쪽 → 왼쪽 -->
+  <path d="M768 640 H344" stroke="#CFE6FF" stroke-width="88" stroke-linecap="round" fill="none"/>
+  <path d="M424 530 L284 640 L424 750" stroke="#CFE6FF" stroke-width="88" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

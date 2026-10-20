@@ -1,0 +1,41 @@
+[workspace]
+resolver = "2"
+members = ["core", "cli", "app/src-tauri"]
+default-members = ["core", "cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# 주의(빌드 환경): x86_64-pc-windows-gnu 자체 포함 툴체인에는 `as`가 없어서, raw-dylib를 쓰는
+# windows-sys 0.61(windows-link)·getrandom 0.3+를 링크하지 못한다(dlltool → as 실행 실패).
+# 그래서 Cargo.lock에서 clap 4.5.40, anstream 0.6.21, anstyle-query 1.1.2, anstyle-wincon 3.0.6,
+# ctrlc 3.4.5, tempfile 3.14.0, nu-ansi-term 0.50.1로 고정해 windows-sys 0.52/0.59(가져온 import lib)만 쓴다.
+# `cargo update`를 그냥 돌리면 이 고정이 풀린다. MinGW binutils나 MSVC 툴체인을 갖추면 풀어도 된다.
+
+[workspace.dependencies]
+convtool-core = { path = "core" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+clap = { version = "4.5", features = ["derive"] }
+ctrlc = "3.4"
+tempfile = "3"
+# core: 엔진 프로세스 트리 정리(Job Object). 0.59는 windows-targets 0.52(가져온 import lib)라 이 환경에서 링크된다.
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+# app (convtool-app) 전용
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-build = { version = "2" }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "macros", "time"] }
+# windows 크레이트는 app/src-tauri/Cargo.toml이 0.58을 직접 지정한다(워크스페이스 공용 항목 없음).

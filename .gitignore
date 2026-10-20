@@ -1,0 +1,21 @@
+# Rust
+/target/
+**/target/
+
+# Node
+node_modules/
+app/ui/dist/
+
+# Tauri
+app/src-tauri/gen/
+
+# 번들 엔진 실행 파일 (빌드 시 내려받기)
+/engines/*
+!/engines/README.md
+
+# 하네스 중간 산출물
+_workspace/
+_workspace_*/
+
+# 로컬 설정
+.claude/settings.local.json
