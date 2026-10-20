@@ -1,0 +1,73 @@
+﻿변환툴 (FileKit) — 함께 배포하는 서드파티 프로그램 고지
+======================================================
+
+변환툴은 아래 변환 엔진을 수정하지 않은 실행 파일 그대로 함께 배포한다.
+엔진은 변환툴에 라이브러리로 링크되지 않으며, 변환할 때마다 별도 프로세스(자식 프로세스)로 실행된다.
+각 엔진의 라이선스 원문은 설치 폴더의 engines\<엔진>\ 아래에 zip에 들어 있던 그대로 있다.
+실제로 묶인 버전, 내려받은 주소, SHA256은 설치 폴더의 engines\VERSIONS.json에 기록되어 있다.
+
+"설치 폴더"는 변환툴을 설치한 폴더를 말한다(기본값은 설치 프로그램이 정한다).
+
+
+1. FFmpeg
+---------
+- 버전: n8.1.3-18-g46d899d7a0 (8.1 브랜치, BtbN FFmpeg-Builds autobuild-2026-10-19-13-06의 win64-lgpl 정적 빌드)
+- 라이선스: GNU Lesser General Public License 2.1 이상 (LGPL-2.1-or-later)
+- 빌드 구성: LGPL 빌드. --enable-gpl, --enable-nonfree 옵션을 쓰지 않은 빌드만 배포한다.
+  GPL 구성 요소(libx264, libx265 등)는 들어 있지 않다.
+- 포함 파일: engines\ffmpeg\bin\ffmpeg.exe, engines\ffmpeg\bin\ffprobe.exe
+- 라이선스 원문: engines\ffmpeg\LICENSE.txt
+- 바이너리 출처: https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-19-13-06/ffmpeg-n8.1.3-18-g46d899d7a0-win64-lgpl-8.1.zip
+  (SHA256 d299b26fa06ad6297ed4c0e3766a31ffc7535c5cd092b2395f7d818a008232b9, engines\VERSIONS.json에도 기록)
+- 소스 코드:
+  - 이 빌드의 FFmpeg 소스(커밋 46d899d7a0): https://github.com/FFmpeg/FFmpeg/commit/46d899d7a0
+  - FFmpeg 저장소: https://git.ffmpeg.org/ffmpeg.git
+  - 빌드 스크립트와 함께 쓴 외부 라이브러리 구성: https://github.com/BtbN/FFmpeg-Builds
+- 교체: FFmpeg는 별도 실행 파일이므로 engines\ffmpeg\bin\ffmpeg.exe와 ffprobe.exe를
+  직접 빌드하거나 받은 호환 버전으로 바꿔 넣어 쓸 수 있다.
+  FFmpeg is licensed under the LGPL-2.1-or-later. This product runs an unmodified LGPL build of
+  FFmpeg as a separate process. See https://ffmpeg.org/legal.html
+
+
+2. libvips
+----------
+- 버전: 8.18.7 (libvips/build-win64-mxe의 vips-dev-x64-all-8.18.7.zip)
+- 라이선스: GNU Lesser General Public License 2.1 이상 (LGPL-2.1-or-later)
+- 포함 파일: engines\vips\bin\ (vips.exe, 같은 폴더의 DLL, bin\vips-modules-8.18\)
+- 라이선스 원문: engines\vips\LICENSE. 함께 묶인 라이브러리 버전은 engines\vips\versions.json
+- 바이너리 출처: https://github.com/libvips/build-win64-mxe/releases/tag/v8.18.7
+- 소스 코드:
+  - libvips 8.18.7: https://github.com/libvips/libvips/releases/tag/v8.18.7
+  - Windows 빌드 구성(함께 묶인 의존 라이브러리 목록과 버전): https://github.com/libvips/build-win64-mxe/tree/v8.18.7
+- 함께 묶인 의존 라이브러리: glib, libjpeg-turbo, libpng, libwebp, libtiff, lcms2, libheif, libaom 등.
+  각 라이브러리는 자체 라이선스(LGPL, BSD, MIT, zlib 등)를 따른다. 목록과 버전은 위 빌드 구성 저장소를 본다.
+- HEIC/HEIF: 이 빌드에는 libheif와 AV1 코덱(libaom)이 들어 있다. HEVC 디코더(libde265)는
+  versions.json에 없어 HEVC로 인코딩된 HEIC는 읽지 못할 수 있다(AVIF는 읽음).
+  HEVC는 특허 대상 코덱이므로 HEVC 디코더를 더할 경우 배포 조건을 먼저 확인해야 한다.
+
+
+3. Pandoc
+---------
+- 버전: 3.12.1 (pandoc-3.12.1-windows-x86_64.zip)
+- 라이선스: GNU General Public License 2.0 이상 (GPL-2.0-or-later)
+- 포함 파일: engines\pandoc\pandoc.exe
+- 라이선스 원문: engines\pandoc\COPYING*, COPYRIGHT*
+- 바이너리 출처: https://github.com/jgm/pandoc/releases/tag/3.12.1
+- 소스 코드:
+  - https://github.com/jgm/pandoc/releases/tag/3.12.1 (Source code zip / tar.gz)
+  - https://hackage.haskell.org/package/pandoc-3.12.1
+- Pandoc은 변환툴과 링크되지 않은 별도 프로그램이며, 변환툴은 명령줄로 실행만 한다.
+
+
+4. 함께 배포하지 않는 것
+-------------------------
+- LibreOffice(MPL-2.0)는 설치 파일에 들어 있지 않다. 문서 변환에는 사용자가 따로 설치한
+  LibreOffice를 쓴다. https://www.libreoffice.org/
+
+
+5. 변환툴 자체
+--------------
+- 변환툴 앱은 Tauri(MIT 또는 Apache-2.0)와 Microsoft Edge WebView2 런타임을 쓴다.
+- 변환툴이 쓰는 Rust 크레이트와 npm 패키지의 라이선스 목록은 소스 저장소의 Cargo.lock과
+  app/ui/package-lock.json에서 확인할 수 있다.
+  https://github.com/cfti1054/FileKit

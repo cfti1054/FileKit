@@ -1,0 +1,40 @@
+{
+  "engines": [
+    {
+      "id": "ffmpeg",
+      "version": "n8.1.3-18-g46d899d7a0",
+      "url": "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-19-13-06/ffmpeg-n8.1.3-18-g46d899d7a0-win64-lgpl-8.1.zip",
+      "sha256": "d299b26fa06ad6297ed4c0e3766a31ffc7535c5cd092b2395f7d818a008232b9",
+      "strip_root": true,
+      "keep": ["bin/ffmpeg.exe", "bin/ffprobe.exe", "LICENSE.txt"],
+      "required": ["bin/ffmpeg.exe"],
+      "license": "LGPL-2.1-or-later",
+      "source_url": "https://github.com/FFmpeg/FFmpeg/commit/46d899d7a0",
+      "notes": "BtbN FFmpeg-Builds, autobuild-2026-10-19-13-06, release/8.1 branch, win64 LGPL static. Build scripts: https://github.com/BtbN/FFmpeg-Builds"
+    },
+    {
+      "id": "vips",
+      "version": "8.18.7",
+      "url": "https://github.com/libvips/build-win64-mxe/releases/download/v8.18.7/vips-dev-x64-all-8.18.7.zip",
+      "sha256": "78e56ba30c267ba32ff965200534bd5721364cadbead8c4d595e44b58dfeff15",
+      "strip_root": true,
+      "keep": ["bin/**", "LICENSE*", "README.md", "versions.json"],
+      "required": ["bin/vips.exe"],
+      "license": "LGPL-2.1-or-later",
+      "source_url": "https://github.com/libvips/libvips/releases/tag/v8.18.7",
+      "notes": "libvips build-win64-mxe, 'all' variant. Loadable modules are in bin/vips-modules-8.18/ (kept by bin/**). versions.json lists bundled library versions. Build scripts: https://github.com/libvips/build-win64-mxe/tree/v8.18.7"
+    },
+    {
+      "id": "pandoc",
+      "version": "3.12.1",
+      "url": "https://github.com/jgm/pandoc/releases/download/3.12.1/pandoc-3.12.1-windows-x86_64.zip",
+      "sha256": "6ef431cb20b2c24a0371fc19200dc49d452be54b1b5c9239f3462841ef53e587",
+      "strip_root": true,
+      "keep": ["pandoc.exe", "COPYING*", "COPYRIGHT*"],
+      "required": ["pandoc.exe"],
+      "license": "GPL-2.0-or-later",
+      "source_url": "https://github.com/jgm/pandoc/releases/tag/3.12.1",
+      "notes": "Official release zip. Source tarball is attached to the release page."
+    }
+  ]
+}

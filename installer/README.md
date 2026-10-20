@@ -9,6 +9,21 @@ Tauri 번들러(NSIS)로 설치 파일을 만들 때 쓰는 훅 스크립트다.
 | 파일 | 내용 |
 | --- | --- |
 | `hooks.nsh` | `NSIS_HOOK_POSTINSTALL`(등록)과 `NSIS_HOOK_POSTUNINSTALL`(삭제, 설정 폴더 삭제 여부 묻기). UTF-8 BOM으로 저장한다. |
+| `licenses/THIRD-PARTY-NOTICES.txt` | FFmpeg·libvips·Pandoc 고지와 소스 위치. 설치 폴더 `licenses\`로 복사된다. 엔진 버전을 바꾸면 같이 고친다. |
+| `../app/src-tauri/tauri.release.conf.json` | 릴리스 빌드에만 병합하는 설정. `externalBin`(convtool 사이드카)과 `resources`(`engines/`, `licenses/`). |
+
+## 설치 폴더 배치
+
+```
+%LOCALAPPDATA%\변환툴\
+├─ 변환툴.exe          트레이 앱 (cargo bin convtool-app, mainBinaryName)
+├─ convtool.exe        CLI 사이드카 (binaries/convtool-<triple>.exe, 번들러가 접미사를 뗌)
+├─ uninstall.exe
+├─ engines\            저장소 engines/ 그대로 (VERSIONS.json, ffmpeg\bin\, vips\bin\, pandoc\). LibreOffice 없음
+└─ licenses\THIRD-PARTY-NOTICES.txt
+```
+
+`convtool.exe`와 `변환툴.exe`는 `<exe 폴더>\engines`에서 엔진을 찾으므로(core `EngineConfig::from_env`) 설치본에 따로 설정이 없다.
 
 ## 등록 항목 (모두 HKCU, spec 6장)
 
@@ -29,16 +44,49 @@ spec 6장의 `%LOCALAPPDATA%\Programs\변환툴`과 다를 수 있다(확인 필
 
 ## 만들기
 
-이 저장소의 개발 환경(GNU 툴체인, `windres`·MSVC 없음)에서는 앱 빌드가 실패한다. MSVC Build Tools와
-`x86_64-pc-windows-msvc` 툴체인을 갖춘 PC에서:
+MSVC Build Tools, `x86_64-pc-windows-msvc` 툴체인, Node 22, WebView2가 있는 PC 또는 CI에서 저장소 루트로:
 
 ```powershell
-cd app/ui
-npm install
-npx tauri build --config ../src-tauri/tauri.conf.json   # 또는 app/src-tauri에서 npx(../ui의 @tauri-apps/cli) tauri build
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1            # 엔진 내려받기 포함
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -SkipFetch # engines/에 있는 것 그대로
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1 -Tag v0.1.0 -OutDir dist
 ```
 
-결과: `target/release/bundle/nsis/변환툴_0.1.0_x64-setup.exe`.
+단계(실패하면 단계 이름을 출력하고 멈춘다):
+
+1. `scripts/check-version.ps1 [-Tag]` — `Cargo.toml`(`[workspace.package]`), `app/src-tauri/tauri.conf.json`,
+   `app/ui/package.json`의 버전이 같은지, 태그가 `v<버전>`인지.
+2. `scripts/fetch-engines.ps1` — `scripts/engines.manifest.json`대로 FFmpeg(LGPL)·libvips·Pandoc을 `engines/`에 받는다
+   (SHA256 확인, 캐시 `.cache/engines`). 사용법은 `engines/README.md`.
+   이어서 `-SkipFetch` 여부와 관계없이 두 가지를 검사한다. `engines/`에 허용 목록(ffmpeg, vips, pandoc,
+   VERSIONS.json, README.md) 밖의 항목(예: `libreoffice/`, `.staging-*`)이 있으면 멈춘다. 그리고 `engines/VERSIONS.json`의
+   version·sha256이 manifest와 다르면 멈춘다. 이 대조는 기록 파일만 보므로, 엔진 실행 파일을 손으로 바꾼 경우는 잡지 못한다.
+3. `scripts/prepare-sidecar.ps1` — `cargo build --release --locked -p convtool-cli` 후
+   `app/src-tauri/binaries/convtool-<host triple>.exe`로 복사. `$env:CARGO_TARGET_DIR`를 따른다.
+4. `app/ui`에서 `npm ci` (`node_modules`가 없을 때만).
+5. `app/src-tauri`에서 `../ui/node_modules/.bin/tauri build --config tauri.release.conf.json -- --locked`.
+6. `<target>/release/bundle/nsis/변환툴_<ver>_x64-setup.exe`를 `dist/FileKit_<ver>_x64-setup.exe`로 복사하고
+   `dist/FileKit_<ver>_x64-setup.exe.sha256`(`<hex>  <파일명>`)을 쓴다. GitHub Release가 비ASCII 자산 이름을 바꾸므로 배포 이름은 ASCII다.
+7. `git diff --exit-code Cargo.lock` — 빌드가 잠금 파일을 바꾸지 않았는지.
+
+기본 `tauri.conf.json`에는 `externalBin`·`resources`를 넣지 않는다. 넣으면 tauri-build가 파일 존재를 검사해서
+엔진·사이드카가 없는 개발 환경의 `cargo build -p convtool-app`이 실패하기 때문이다.
+
+이 저장소의 개발 PC(GNU 툴체인, `windres`·MSVC 없음)에서는 5단계에서 실패한다. 1~4단계는 여기서도 확인할 수 있다.
+
+## 릴리스 절차
+
+1. 세 파일의 버전을 같은 값으로 올린다: `Cargo.toml`의 `[workspace.package] version`,
+   `app/src-tauri/tauri.conf.json`의 `version`, `app/ui/package.json`의 `version`
+   (`app/ui/package-lock.json`의 버전도 `npm install --package-lock-only`로 맞춘다).
+2. 엔진을 바꿨다면 `scripts/engines.manifest.json`과 `installer/licenses/THIRD-PARTY-NOTICES.txt`의 버전·주소를 함께 고친다.
+3. `powershell -File scripts/check-version.ps1 -Tag v<버전>`이 0으로 끝나는지 확인하고 커밋한다.
+4. 태그를 만들고 푸시한다: `git tag v<버전>` → `git push origin v<버전>`.
+   - `.github/workflows/release.yml`이 MSVC로 빌드하고, 설치 스모크(무음 설치 → 파일·엔진·HKCU 등록 확인 → 무음 제거)를 거쳐
+     GitHub Release에 `FileKit_<ver>_x64-setup.exe`와 `.sha256`을 올린다.
+   - 태그에 `-`가 있으면(예: `v0.2.0-rc.1`) prerelease로 올린다. 이때 세 파일의 버전도 `0.2.0-rc.1`처럼 태그와 같은 값이어야 한다
+     (`check-version.ps1 -Tag`가 검사). Tauri NSIS 번들러가 prerelease 버전(`-rc.1`)을 받아들이는지는 확인 안 됨.
+5. 태그 없이 확인만 하려면 Actions에서 `release` 워크플로를 수동 실행(workflow_dispatch)한다. Release 없이 artifact만 남는다.
 
 ## 설치 후 확인 방법 (수동)
 

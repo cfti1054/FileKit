@@ -1,0 +1,244 @@
+# 설치 파일(NSIS) 만들기와 GitHub Release 배포.
+# - push tag v*         : 빌드 + 설치 스모크 + Release 생성 (태그에 '-'가 있으면 prerelease)
+# - workflow_dispatch   : 빌드 + 설치 스모크 + artifact만 (Release 없음)
+# 보안: actions/*만 쓰고, ${{ }} 값은 run 안에 직접 넣지 않고 env로 넘긴다. 권한은 job마다 최소로 준다.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (windows, msvc)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: "0"
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/ui/package-lock.json
+
+      - name: Rust toolchain (stable MSVC)
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-msvc --profile minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup default stable-x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustc -vV
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-msvc-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-msvc-
+
+      - name: Cache engine zips
+        uses: actions/cache@v4
+        with:
+          path: .cache/engines
+          key: engines-${{ hashFiles('scripts/engines.manifest.json') }}
+
+      # MSVC CI는 convtool-app(Tauri)까지 검사할 수 있는 유일한 곳이라 --workspace로 돌린다.
+      - name: Rust clippy and tests (workspace)
+        run: |
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --workspace --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --exit-code -- Cargo.lock
+          if ($LASTEXITCODE -ne 0) { Write-Host 'Cargo.lock changed'; exit 1 }
+
+      - name: UI install, typecheck, test
+        working-directory: app/ui
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run typecheck
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build installer
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if ($env:REF_TYPE -eq 'tag') {
+            ./scripts/build-installer.ps1 -Tag $env:REF_NAME
+          } else {
+            ./scripts/build-installer.ps1
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem dist | Format-Table Name, Length
+
+      - name: Install smoke test
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # 한글 이름은 ASCII 이스케이프로 만든다(코드 페이지와 무관). 변환툴 = U+BCC0 U+D658 U+D234
+          $app = "$([char]0xBCC0)$([char]0xD658)$([char]0xD234)"
+          $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          $shellKey = "Software\Classes\*\shell\$app"   # '*'는 PowerShell 와일드카드라 .NET 레지스트리 API로 연다
+
+          function Test-RunValue {
+            $p = Get-ItemProperty -LiteralPath $runKey -ErrorAction SilentlyContinue
+            return [bool]($p -and ($p.PSObject.Properties.Name -contains $app))
+          }
+          function Test-ShellKey {
+            $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($shellKey)
+            if ($k) { $k.Close(); return $true }
+            return $false
+          }
+
+          $setup = Get-ChildItem -LiteralPath dist -Filter 'FileKit_*_x64-setup.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'dist에 설치 파일 없음' }
+          $hashLine = (Get-Content -LiteralPath ($setup.FullName + '.sha256') -Raw).Trim()
+          $hash = (Get-FileHash -LiteralPath $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hashLine -ne "$hash  $($setup.Name)") { throw ".sha256 불일치: $hashLine" }
+
+          $dir = Join-Path $env:RUNNER_TEMP 'fk'
+          # NSIS: /D= 는 마지막 인자, 따옴표 없이. 관리자 권한 없이(/S, currentUser) 설치되어야 한다.
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList @('/S', "/D=$dir") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "설치 exit $($p.ExitCode)" }
+
+          $mustExist = @(
+            "$app.exe", 'convtool.exe', 'uninstall.exe',
+            'engines\VERSIONS.json',
+            'engines\ffmpeg\bin\ffmpeg.exe', 'engines\ffmpeg\bin\ffprobe.exe',
+            'engines\vips\bin\vips.exe',
+            'engines\pandoc\pandoc.exe',
+            'licenses\THIRD-PARTY-NOTICES.txt'
+          )
+          foreach ($rel in $mustExist) {
+            $path = Join-Path $dir $rel
+            if (-not (Test-Path -LiteralPath $path)) { throw "없음: $path" }
+            Write-Host "ok  $rel"
+          }
+          if (Test-Path -LiteralPath (Join-Path $dir 'engines\libreoffice')) { throw 'LibreOffice가 번들됨' }
+
+          $env:CONVTOOL_ENGINES_ONLY = '1'
+          $json = & (Join-Path $dir 'convtool.exe') engines --json
+          if ($LASTEXITCODE -ne 0) { throw "convtool engines exit $LASTEXITCODE" }
+          Write-Host $json
+          $engines = $json | ConvertFrom-Json
+          foreach ($id in @('ffmpeg', 'vips', 'pandoc')) {
+            $e = $engines | Where-Object { $_.id -eq $id }
+            if (-not $e -or -not $e.found -or $e.source -ne 'bundled') { throw "$id 가 bundled로 잡히지 않음" }
+            Write-Host "ok  $id bundled: $($e.path)"
+          }
+          Remove-Item Env:\CONVTOOL_ENGINES_ONLY
+
+          & reg.exe query 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run' /v $app | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Run 값 없음 (reg query)' }
+          if (-not (Test-RunValue)) { throw 'Run 값 없음' }
+          if (-not (Test-ShellKey)) { throw '우클릭 메뉴 키 없음' }
+          Write-Host 'ok  HKCU Run, *\shell registered'
+
+          # NSIS 제거 프로그램은 임시 폴더로 자신을 복사해 다시 실행하므로 -Wait만으로는 끝을 알 수 없다. 레지스트리를 기다린다.
+          $u = Start-Process -FilePath (Join-Path $dir 'uninstall.exe') -ArgumentList '/S' -Wait -PassThru
+          if ($u.ExitCode -ne 0) { throw "제거 exit $($u.ExitCode)" }
+          $deadline = (Get-Date).AddSeconds(120)
+          while (((Test-RunValue) -or (Test-ShellKey)) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
+          if (Test-RunValue) { throw '제거 후 Run 값이 남음' }
+          if (Test-ShellKey) { throw '제거 후 *\shell 키가 남음' }
+          Write-Host 'ok  uninstall removed HKCU entries'
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: filekit-installer
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: GitHub Release
+    needs: build
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Download installer
+        uses: actions/download-artifact@v4
+        with:
+          name: filekit-installer
+          path: dist
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          ls -l dist
+          (cd dist && sha256sum -c ./*.sha256)
+          sha_text="$(sed 's/^/   /' dist/*.sha256)"
+          cat > notes.md <<EOF
+          ## 설치
+
+          1. 아래 \`FileKit_*_x64-setup.exe\`를 받는다.
+          2. (권장) 받은 파일의 SHA256을 확인한다. PowerShell:
+
+             \`\`\`powershell
+             (Get-FileHash .\\FileKit_*_x64-setup.exe -Algorithm SHA256).Hash.ToLower()
+             \`\`\`
+
+             결과가 아래 값(같이 올린 \`.sha256\` 파일 내용)과 같아야 한다.
+
+             \`\`\`
+          ${sha_text}
+             \`\`\`
+
+          3. 실행한다. 관리자 권한 없이 현재 사용자 폴더(%LOCALAPPDATA%)에 설치된다.
+
+          ## SmartScreen 경고
+
+          설치 파일은 코드 서명이 되어 있지 않다. "Windows의 PC 보호" 창이 뜨면
+          **추가 정보 → 실행**을 누른다. 위 SHA256이 맞는지 먼저 확인하는 것을 권한다.
+
+          ## 참고
+
+          - FFmpeg(LGPL 빌드), libvips, Pandoc이 함께 들어 있다. 고지와 소스 위치는 설치 폴더의 \`licenses\\THIRD-PARTY-NOTICES.txt\`.
+          - LibreOffice는 들어 있지 않다. 문서(DOCX·PPTX·XLSX → PDF 등) 변환에는 따로 설치한다.
+          EOF
+          prerelease=()
+          case "$TAG" in
+            *-*) prerelease=(--prerelease) ;;
+          esac
+          gh release create "$TAG" dist/* \
+            --verify-tag \
+            --title "$TAG" \
+            --notes-file notes.md \
+            "${prerelease[@]}"

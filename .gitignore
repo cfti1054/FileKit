@@ -8,6 +8,12 @@ app/ui/dist/
 
 # Tauri
 app/src-tauri/gen/
+# 릴리스 빌드 때 만드는 CLI 사이드카 (scripts/prepare-sidecar.ps1)
+app/src-tauri/binaries/
+
+# 설치 파일 출력과 엔진 내려받기 캐시
+/dist/
+/.cache/
 
 # 번들 엔진 실행 파일 (빌드 시 내려받기)
 /engines/*
@@ -19,3 +25,11 @@ _workspace_*/
 
 # 로컬 설정
 .claude/settings.local.json
+
+# OS·편집기
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+*.log
