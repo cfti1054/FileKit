@@ -16,6 +16,7 @@ use convtool_core::{BatchTicket, CoreError, FormatsReport, JobId, JobRequest};
 
 #[cfg(feature = "tauri-app")]
 pub mod client;
+pub mod security;
 #[cfg(feature = "tauri-app")]
 pub mod server;
 

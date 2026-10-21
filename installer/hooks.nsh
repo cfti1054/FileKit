@@ -1,26 +1,58 @@
-﻿; 변환툴 NSIS 설치 훅 (Tauri 번들러 installerHooks).
+﻿; FileKit NSIS 설치 훅 (Tauri 번들러 installerHooks).
 ; 이 파일은 UTF-8 BOM으로 저장한다 (NSIS가 한글 문자열을 읽게).
 ;
 ; 모든 등록은 HKCU(현재 사용자)에만 한다. 관리자 권한을 요구하지 않는다.
 ; 등록 항목은 spec 6장 "등록 항목" 표를 따른다:
-;   - 시작 시 실행: HKCU\Software\Microsoft\Windows\CurrentVersion\Run  값 "변환툴" = "<설치 폴더>\변환툴.exe" --tray
-;   - 우클릭 메뉴:  HKCU\Software\Classes\*\shell\변환툴  (command = "<설치 폴더>\변환툴.exe" convert "%1" --ask)
-;   - 알림 AUMID:  HKCU\Software\Classes\AppUserModelId\com.filekit.convtool  DisplayName = 변환툴
+;   - 설치 폴더:    %LOCALAPPDATA%\Programs\FileKit (Tauri 기본값 %LOCALAPPDATA%\FileKit을 아래에서 바꾼다)
+;   - 시작 시 실행: HKCU\Software\Microsoft\Windows\CurrentVersion\Run  값 "FileKit" = "<설치 폴더>\FileKit.exe" --tray
+;   - 우클릭 메뉴:  HKCU\Software\Classes\*\shell\FileKit  (command = "<설치 폴더>\FileKit.exe" convert "%1" --ask)
+;   - 알림 AUMID:  HKCU\Software\Classes\AppUserModelId\com.filekit.convtool  DisplayName = FileKit
 ;   - 제거 정보와 바탕화면 바로가기는 Tauri NSIS 템플릿이 만든다 (installer/README.md).
 ;   - 휠 클릭 원형 메뉴는 레지스트리 등록이 없다 (트레이 프로세스가 실행 중에 훅을 설치하고 종료 시 해제).
+;   - 이전 이름(변환툴)으로 등록된 Run 값과 우클릭 키는 설치할 때 지운다.
 ;
 ; 레지스트리 경로와 명령 문자열은 아래 !define 한 곳에 모은다.
+; 이 파일은 템플릿에서 PRODUCTNAME 정의보다 먼저 !include되므로 ${PRODUCTNAME}을 쓰지 않고 이름을 직접 적는다.
 
-!define CONVTOOL_EXE "변환툴.exe"
+!define CONVTOOL_EXE "FileKit.exe"
 !define CONVTOOL_RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
-!define CONVTOOL_RUN_VALUE "변환툴"
-!define CONVTOOL_SHELL_KEY "Software\Classes\*\shell\변환툴"
-!define CONVTOOL_SHELL_VERB "변환툴로 변환"
+!define CONVTOOL_RUN_VALUE "FileKit"
+!define CONVTOOL_SHELL_KEY "Software\Classes\*\shell\FileKit"
+!define CONVTOOL_SHELL_VERB "FileKit으로 변환"
 !define CONVTOOL_AUMID "com.filekit.convtool"
 !define CONVTOOL_AUMID_KEY "Software\Classes\AppUserModelId\com.filekit.convtool"
-!define CONVTOOL_DATA_DIR "$APPDATA\변환툴"
+!define CONVTOOL_DATA_DIR "$APPDATA\FileKit"
+!define CONVTOOL_LEGACY_RUN_VALUE "변환툴"
+!define CONVTOOL_LEGACY_SHELL_KEY "Software\Classes\*\shell\변환툴"
+; Tauri currentUser 기본 설치 폴더와 spec 6장의 설치 폴더
+!define CONVTOOL_TAURI_DEFAULT_DIR "$LOCALAPPDATA\FileKit"
+!define CONVTOOL_DEFAULT_DIR "$LOCALAPPDATA\Programs\FileKit"
+
+; 기본 설치 폴더 바꾸기 (화면 설치).
+; 템플릿 .onInit이 $INSTDIR를 $LOCALAPPDATA\<productName>(이전 설치가 있으면 그 위치)으로 정한 뒤,
+; 폴더 선택 화면 전에 .onGUIInit(MUI)에서 Tauri 기본값일 때만 spec 위치로 바꾼다.
+; /D=로 지정했거나 이전 설치 위치를 이어받은 경우는 그대로 둔다.
+!define MUI_CUSTOMFUNCTION_GUIINIT ConvtoolDefaultInstDir
+Function ConvtoolDefaultInstDir
+  StrCmp $INSTDIR "${CONVTOOL_TAURI_DEFAULT_DIR}" 0 +2
+    StrCpy $INSTDIR "${CONVTOOL_DEFAULT_DIR}"
+FunctionEnd
+
+!macro NSIS_HOOK_PREINSTALL
+  ; 무음 설치(/S)는 .onGUIInit을 거치지 않으므로 여기서 한 번 더 바꾼다.
+  ; 템플릿이 바로 앞에서 SetOutPath $INSTDIR로 만든 빈 폴더는 작업 폴더를 옮긴 뒤 지운다(비어 있을 때만 지워진다).
+  StrCmp $INSTDIR "${CONVTOOL_TAURI_DEFAULT_DIR}" 0 convtool_instdir_ok
+    StrCpy $INSTDIR "${CONVTOOL_DEFAULT_DIR}"
+    SetOutPath $INSTDIR
+    RMDir "${CONVTOOL_TAURI_DEFAULT_DIR}"
+  convtool_instdir_ok:
+!macroend
 
 !macro NSIS_HOOK_POSTINSTALL
+  ; 이전 이름으로 테스트 설치한 등록 정리
+  DeleteRegValue HKCU "${CONVTOOL_RUN_KEY}" "${CONVTOOL_LEGACY_RUN_VALUE}"
+  DeleteRegKey HKCU "${CONVTOOL_LEGACY_SHELL_KEY}"
+
   ; 시작 시 트레이 실행
   WriteRegStr HKCU "${CONVTOOL_RUN_KEY}" "${CONVTOOL_RUN_VALUE}" '"$INSTDIR\${CONVTOOL_EXE}" --tray'
 
@@ -33,8 +65,8 @@
   WriteRegStr HKCU "${CONVTOOL_SHELL_KEY}\command" "" '"$INSTDIR\${CONVTOOL_EXE}" convert "%1" --ask'
   ; TODO: SubCommands (형식별 하위 메뉴, spec 6장 "+ SubCommands"). 지금은 원형 메뉴로 형식을 묻는다.
 
-  ; 토스트 발신자 이름 (AUMID)
-  WriteRegStr HKCU "${CONVTOOL_AUMID_KEY}" "DisplayName" "변환툴"
+  ; 토스트 발신자 이름 (AUMID). 앱이 SetCurrentProcessExplicitAppUserModelID로 같은 ID를 쓴다.
+  WriteRegStr HKCU "${CONVTOOL_AUMID_KEY}" "DisplayName" "FileKit"
   WriteRegExpandStr HKCU "${CONVTOOL_AUMID_KEY}" "IconUri" "$INSTDIR\${CONVTOOL_EXE}"
 !macroend
 
@@ -42,6 +74,8 @@
   DeleteRegValue HKCU "${CONVTOOL_RUN_KEY}" "${CONVTOOL_RUN_VALUE}"
   DeleteRegKey HKCU "${CONVTOOL_SHELL_KEY}"
   DeleteRegKey HKCU "${CONVTOOL_AUMID_KEY}"
+  DeleteRegValue HKCU "${CONVTOOL_RUN_KEY}" "${CONVTOOL_LEGACY_RUN_VALUE}"
+  DeleteRegKey HKCU "${CONVTOOL_LEGACY_SHELL_KEY}"
 
   ; 사용자 설정 폴더 삭제 여부를 묻는다. 무음 제거(업데이트 포함)는 묻지 않고 남긴다.
   ; 변환 결과 파일은 원본 폴더에 있으므로 건드리지 않는다.

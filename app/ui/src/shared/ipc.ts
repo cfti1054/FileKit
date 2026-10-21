@@ -154,6 +154,10 @@ export interface MainNavigatePayload {
   view: "drop" | "history" | "settings";
 }
 
+export interface MainOpenFilesPayload {
+  files: string[];
+}
+
 export const EVENTS = {
   radialOpen: "radial:open",
   radialClose: "radial:close",
@@ -161,6 +165,7 @@ export const EVENTS = {
   job: "job:event",
   theme: "theme:changed",
   mainNavigate: "main:navigate",
+  mainOpenFiles: "main:open_files",
 } as const;
 
 export interface EventMap {
@@ -170,6 +175,7 @@ export interface EventMap {
   "job:event": JobEvent;
   "theme:changed": ThemeInfo;
   "main:navigate": MainNavigatePayload;
+  "main:open_files": MainOpenFilesPayload;
 }
 
 export interface Ipc {

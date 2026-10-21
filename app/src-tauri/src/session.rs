@@ -133,13 +133,20 @@ impl Sessions {
         self.current.take().map(|s| s.id())
     }
 
-    /// 훅이 받은 휠 버튼 떼기 → `radial:mbutton_up` payload. 휠로 연 세션일 때만.
-    pub fn mbutton_up(&self, screen: (i32, i32), at: Instant) -> Option<MButtonUpPayload> {
+    /// 훅이 받은 휠 버튼 떼기 → `radial:mbutton_up` payload. 휠로 연 세션이고, 그 세션을 연 누름
+    /// (`press_down` = 누른 시각)의 짝일 때만. 다른 파일을 휠 클릭하는 동안 열려 있던 이전 메뉴가
+    /// 새 누름의 떼기를 제스처 놓기로 받지 않게 한다.
+    pub fn mbutton_up(
+        &self,
+        screen: (i32, i32),
+        press_down: Instant,
+        at: Instant,
+    ) -> Option<MButtonUpPayload> {
         let s = self.current.as_ref()?;
         if s.payload.opened_by != OpenedBy::Wheel {
             return None;
         }
-        let down = s.down_at?;
+        let down = s.down_at.filter(|d| *d == press_down)?;
         let p = to_overlay_css(screen, s.window_origin, s.scale);
         let held = at.saturating_duration_since(down).as_millis();
         Some(MButtonUpPayload {
@@ -304,18 +311,32 @@ mod tests {
         sess.down_at = Some(down);
         s.open(sess);
         let p = s
-            .mbutton_up((100 + 360, 200 + 360), down + Duration::from_millis(180))
+            .mbutton_up(
+                (100 + 360, 200 + 360),
+                down,
+                down + Duration::from_millis(180),
+            )
             .unwrap();
         assert_eq!(p.session_id, 7);
         assert_eq!((p.x, p.y), (240.0, 240.0));
         assert_eq!(p.held_ms, 180);
+        // 다른 누름(이전 메뉴가 열린 채 새 휠 클릭)의 떼기는 넘기지 않는다
+        assert!(s
+            .mbutton_up(
+                (0, 0),
+                down + Duration::from_millis(5),
+                down + Duration::from_millis(9)
+            )
+            .is_none());
     }
 
     #[test]
     fn mbutton_up_only_for_wheel_sessions() {
         let mut s = Sessions::new();
-        assert!(s.mbutton_up((0, 0), Instant::now()).is_none());
+        let now = Instant::now();
+        assert!(s.mbutton_up((0, 0), now, now).is_none());
         s.open(session(1, OpenedBy::ContextMenu));
-        assert!(s.mbutton_up((0, 0), Instant::now()).is_none());
+        let now = Instant::now();
+        assert!(s.mbutton_up((0, 0), now, now).is_none());
     }
 }

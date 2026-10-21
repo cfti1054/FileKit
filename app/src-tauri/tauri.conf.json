@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "변환툴",
-  "mainBinaryName": "변환툴",
+  "productName": "FileKit",
+  "mainBinaryName": "FileKit",
   "version": "0.1.0",
   "identifier": "com.filekit.convtool",
   "build": {
@@ -15,7 +15,7 @@
       {
         "label": "main",
         "url": "index.html",
-        "title": "변환툴",
+        "title": "FileKit",
         "width": 720,
         "height": 520,
         "visible": false

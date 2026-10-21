@@ -1,6 +1,6 @@
 ---
 name: engine-adapter
-description: 변환툴 코어의 변환 엔진 어댑터(FFmpeg, libvips, LibreOffice, Pandoc)와 형식 표(formats.rs), 프리셋(presets.rs)을 만들거나 고치는 방법. 새 입력·출력 형식 추가, 엔진 명령 인자 변경, 엔진 탐색 경로, 진행률 파싱, 엔진 실행 실패 처리를 다룰 때 사용한다. 원형 메뉴 화면이나 탐색기 연동에는 쓰지 않는다.
+description: FileKit 코어의 변환 엔진 어댑터(FFmpeg, libvips, LibreOffice, Pandoc)와 형식 표(formats.rs), 프리셋(presets.rs)을 만들거나 고치는 방법. 새 입력·출력 형식 추가, 엔진 명령 인자 변경, 엔진 탐색 경로, 진행률 파싱, 엔진 실행 실패 처리를 다룰 때 사용한다. 원형 메뉴 화면이나 탐색기 연동에는 쓰지 않는다.
 ---
 
 # 엔진 어댑터 작성법

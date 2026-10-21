@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useState } from "react";
 import {
+  EVENTS,
   toErrorInfo,
   type EngineInfo,
   type ErrorInfo,
@@ -56,17 +57,26 @@ export function App({ ipc }: { ipc: Ipc }) {
     void Promise.all([
       ipc.on("job:event", dispatchJob),
       ipc.on("main:navigate", (p) => setView(p.view)),
+      ipc.on(EVENTS.mainOpenFiles, (p) => {
+        // 끌어다 놓기와 같은 흐름: 변환 화면으로 가서 형식 선택을 띄운다.
+        setView("drop");
+        void handleFiles(p.files);
+      }),
     ]).then((us) => {
-      if (disposed) us.forEach((u) => u());
-      else offs.push(...us);
+      if (disposed) {
+        us.forEach((u) => u());
+        return;
+      }
+      offs.push(...us);
+      // 구독을 마친 뒤 읽어야 그 사이 main:open_files로 온 파일을 놓치지 않는다.
+      ipc
+        .getLaunchFiles()
+        .then((files) => {
+          if (!disposed && files.length > 0) void handleFiles(files);
+        })
+        .catch(() => undefined);
     });
     ipc.getPresets().then((p) => !disposed && setPresets(p)).catch(() => undefined);
-    ipc
-      .getLaunchFiles()
-      .then((files) => {
-        if (!disposed && files.length > 0) void handleFiles(files);
-      })
-      .catch(() => undefined);
     return () => {
       disposed = true;
       offs.forEach((u) => u());
@@ -96,7 +106,7 @@ export function App({ ipc }: { ipc: Ipc }) {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>변환툴</h1>
+        <h1>FileKit</h1>
         <nav className="tabs" role="tablist" aria-label="화면">
           {TABS.map((t) => (
             <button

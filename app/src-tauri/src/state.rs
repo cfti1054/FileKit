@@ -11,6 +11,7 @@ use crate::busy::BusyTracker;
 use crate::notify::{LogNotifier, Notifier};
 use crate::pipe::MenuBatcher;
 use crate::session::Sessions;
+use crate::trigger::PressGate;
 
 /// 앱이 어떤 방식으로 떠 있는지
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,16 +34,23 @@ pub struct AppState {
     core_rx: watch::Receiver<Option<Arc<Core>>>,
     /// 창 모드로 시작할 때 받은 파일 (`get_launch_files`가 한 번 읽고 비운다)
     pub launch_files: Mutex<Vec<PathBuf>>,
+    /// 메인 창 페이지가 `get_launch_files`를 불렀다(= `main:open_files`를 들을 준비가 됐다).
+    /// `launch_files` 잠금 안에서만 읽고 쓴다.
+    pub main_ready: AtomicBool,
     pub sessions: Mutex<Sessions>,
     pub menu_batcher: Mutex<MenuBatcher>,
     /// 트레이 "원형 메뉴 일시 중지" (훅 판정이 읽는다)
     pub paused: Arc<AtomicBool>,
+    /// 삼킨 휠 클릭 하나의 진행 상태 (훅 스레드와 트리거 조정자가 공유)
+    pub press_gate: Arc<PressGate>,
     pub busy: Mutex<BusyTracker>,
     /// 파이프 `subscribe` 연결로 보낼 작업 이벤트
     pub events: broadcast::Sender<JobEvent>,
     pub notifier: Arc<dyn Notifier>,
     /// 트리거 스레드 (트레이 모드). 종료할 때 멈춘다.
     pub trigger: Mutex<Option<crate::app::TriggerHandles>>,
+    /// 시스템 테마 변경 감시 (theme:changed 즉시 전송)
+    pub theme_watch: Mutex<Option<crate::theme::ThemeWatcher>>,
 }
 
 /// 잠금이 오염(poison)돼도 안의 값을 쓴다. 상태는 단순 값이라 일관성이 깨지지 않는다.
@@ -59,13 +67,16 @@ impl AppState {
             core_tx,
             core_rx,
             launch_files: Mutex::new(launch_files),
+            main_ready: AtomicBool::new(false),
             sessions: Mutex::new(Sessions::new()),
             menu_batcher: Mutex::new(MenuBatcher::new()),
             paused: Arc::new(AtomicBool::new(false)),
+            press_gate: Arc::new(PressGate::new()),
             busy: Mutex::new(BusyTracker::new()),
             events,
-            notifier: Arc::new(LogNotifier),
+            notifier: make_notifier(),
             trigger: Mutex::new(None),
+            theme_watch: Mutex::new(None),
         }
     }
 
@@ -95,5 +106,13 @@ impl AppState {
     /// 종료: 코어를 내려 JobQueue Drop(shutdown: 모두 취소, 작업 스레드 join)이 일어나게 한다.
     pub fn take_core(&self) -> Option<Arc<Core>> {
         self.core_tx.send_replace(None)
+    }
+}
+
+/// 토스트 알림을 쓸 수 있으면 토스트, 아니면 로그만.
+fn make_notifier() -> Arc<dyn Notifier> {
+    match crate::notify::ToastNotifier::start() {
+        Some(t) => Arc::new(t),
+        None => Arc::new(LogNotifier),
     }
 }

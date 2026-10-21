@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use convtool_core::PresetId;
 
 #[derive(Debug, Parser)]
-#[command(name = "convtool", version = convtool_core::VERSION, about = "변환툴 명령줄 도구")]
+#[command(name = "convtool", version = convtool_core::VERSION, about = "FileKit 명령줄 도구")]
 pub struct Cli {
     /// 표준 출력에 JSON으로 쓴다 (convert: 한 줄에 이벤트 하나)
     #[arg(long, global = true)]

@@ -17,8 +17,8 @@ pub const MENU_PAUSE_RADIAL: &str = "pause_radial";
 pub const MENU_SETTINGS: &str = "settings";
 pub const MENU_QUIT: &str = "quit";
 
-const TOOLTIP_IDLE: &str = "변환툴";
-const TOOLTIP_BUSY: &str = "변환툴 - 변환 중";
+const TOOLTIP_IDLE: &str = "FileKit";
+const TOOLTIP_BUSY: &str = "FileKit - 변환 중";
 
 fn idle_icon(app: &AppHandle) -> Option<Image<'static>> {
     app.default_window_icon().cloned().map(Image::to_owned)

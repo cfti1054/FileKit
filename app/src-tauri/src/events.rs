@@ -4,6 +4,8 @@
 //! 규칙: 필드 snake_case, `Option`은 항상 필드가 있고 없으면 `null`, `skip_serializing_if` 금지.
 
 use convtool_core::FormatsReport;
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 pub const WINDOW_MAIN: &str = "main";
@@ -15,6 +17,7 @@ pub const EV_RADIAL_MBUTTON_UP: &str = "radial:mbutton_up";
 pub const EV_JOB: &str = "job:event";
 pub const EV_THEME: &str = "theme:changed";
 pub const EV_MAIN_NAVIGATE: &str = "main:navigate";
+pub const EV_MAIN_OPEN_FILES: &str = "main:open_files";
 
 /// 오버레이 창 기준 CSS px
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -99,6 +102,34 @@ pub enum MainView {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MainNavigatePayload {
     pub view: MainView,
+}
+
+/// `main:open_files`: 이미 떠 있는 메인 창에 파일을 넘긴다(파이프 `show_main_window{files}`).
+/// 받은 창은 끌어다 놓기와 같은 흐름(`get_formats`)으로 처리한다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MainOpenFilesPayload {
+    pub files: Vec<PathBuf>,
+}
+
+/// 메인 창이 파일을 받을 준비가 됐는지에 따라 파일을 어디로 보낼지 (순수)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MainFilesRoute {
+    /// 보낼 파일 없음 (창만 보인다)
+    None,
+    /// 페이지가 `get_launch_files`를 이미 불렀다 → `main:open_files` 이벤트
+    Emit(MainOpenFilesPayload),
+    /// 페이지가 아직 안 떴다 → `launch_files`에 쌓아 첫 `get_launch_files`가 읽게 한다
+    Queue(Vec<PathBuf>),
+}
+
+pub fn route_main_files(files: Vec<PathBuf>, page_ready: bool) -> MainFilesRoute {
+    if files.is_empty() {
+        MainFilesRoute::None
+    } else if page_ready {
+        MainFilesRoute::Emit(MainOpenFilesPayload { files })
+    } else {
+        MainFilesRoute::Queue(files)
+    }
 }
 
 #[cfg(test)]
@@ -209,7 +240,29 @@ mod tests {
         assert_eq!(EV_JOB, "job:event");
         assert_eq!(EV_THEME, "theme:changed");
         assert_eq!(EV_MAIN_NAVIGATE, "main:navigate");
+        assert_eq!(EV_MAIN_OPEN_FILES, "main:open_files");
         assert_eq!(WINDOW_MAIN, "main");
         assert_eq!(WINDOW_RADIAL, "radial");
+    }
+
+    #[test]
+    fn main_open_files_json_and_route() {
+        let p = MainOpenFilesPayload {
+            files: vec![PathBuf::from(r"C:\영상\발표 녹화.mov")],
+        };
+        assert_eq!(
+            serde_json::to_value(&p).unwrap(),
+            json!({"files": [r"C:\영상\발표 녹화.mov"]})
+        );
+        assert_eq!(route_main_files(vec![], true), MainFilesRoute::None);
+        assert_eq!(route_main_files(vec![], false), MainFilesRoute::None);
+        assert_eq!(
+            route_main_files(p.files.clone(), true),
+            MainFilesRoute::Emit(p.clone())
+        );
+        assert_eq!(
+            route_main_files(p.files.clone(), false),
+            MainFilesRoute::Queue(p.files)
+        );
     }
 }

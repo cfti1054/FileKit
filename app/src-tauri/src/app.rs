@@ -24,6 +24,8 @@ use crate::pipe::server;
 use crate::state::{lock, AppState, Core, RunKind};
 
 pub fn run(mode: AppMode) -> ExitCode {
+    // 창을 만들기 전에 AUMID를 정한다(토스트 발신자 이름, 작업 표시줄 묶음).
+    crate::notify::set_process_aumid();
     match mode {
         AppMode::Tray => run_tray(),
         AppMode::Window => {
@@ -113,6 +115,7 @@ fn run_app(kind: RunKind, launch_files: Vec<PathBuf>, pipe: Option<NamedPipeServ
         .setup(move |app| {
             let handle = app.handle().clone();
             start_core(&handle);
+            start_theme_watch(&handle);
             match kind {
                 RunKind::Window => crate::tray::show_main(&handle),
                 RunKind::Tray => {
@@ -176,6 +179,19 @@ fn start_core(app: &AppHandle) {
     }
 }
 
+/// 시스템 테마(강조색·고대비·애니메이션) 변경을 바로 `theme:changed`로 보낸다.
+fn start_theme_watch(app: &AppHandle) {
+    // 기준값을 먼저 읽어 둔다(첫 변경부터 알린다).
+    crate::overlay::refresh_theme(app);
+    let handle = app.clone();
+    match crate::theme::watch(move || {
+        crate::overlay::refresh_theme(&handle);
+    }) {
+        Ok(w) => *lock(&app.state::<AppState>().theme_watch) = Some(w),
+        Err(e) => tracing::warn!("테마 감시를 시작하지 못했습니다(메뉴를 열 때만 반영): {e}"),
+    }
+}
+
 fn make_sink(app: &AppHandle) -> EventSink {
     let handle = app.clone();
     Arc::new(move |ev: &JobEvent| {
@@ -189,7 +205,7 @@ fn make_sink(app: &AppHandle) -> EventSink {
         if let Some(busy) = changed {
             crate::tray::set_busy(&handle, busy);
         }
-        crate::notify::dispatch(state.notifier.as_ref(), ev);
+        state.notifier.event(ev);
     })
 }
 
@@ -216,10 +232,13 @@ fn start_trigger(app: &AppHandle) -> std::io::Result<TriggerHandles> {
 
     let state = app.state::<AppState>();
     let (htx, hrx) = std::sync::mpsc::channel::<HookEvent>();
-    let hook = hook::start(htx, state.paused.clone())?;
+    let gate = state.press_gate.clone();
+    let hook = hook::start(htx, state.paused.clone(), gate.clone())?;
 
     let on_result_app = app.clone();
+    let result_gate = gate.clone();
     let explorer = explorer::start(move |req: IdentifyRequest, outcome: IdentifyOutcome| {
+        let identified_ms = req.at.elapsed().as_secs_f64() * 1000.0;
         match outcome {
             IdentifyOutcome::Files(found) => {
                 let r = crate::overlay::open_menu(
@@ -230,17 +249,26 @@ fn start_trigger(app: &AppHandle) -> std::io::Result<TriggerHandles> {
                     OpenedBy::Wheel,
                     Some(req.at),
                 );
-                if let Err(e) = r {
-                    // 지원하지 않는 파일 위의 휠 클릭 등. 메뉴를 열지 않는다.
-                    tracing::info!(code = ?e.code, "원형 메뉴를 열지 않음: {}", e.message);
+                match r {
+                    Ok(_) => result_gate.menu_opened(),
+                    Err(e) => {
+                        // 지원하지 않는 파일, 엔진 확인 중 등. 메뉴를 열지 않고 원래 휠 클릭을 살린다.
+                        tracing::info!(code = ?e.code, identified_ms, "원형 메뉴를 열지 않음: {}", e.message);
+                        hook::replay(&result_gate);
+                    }
                 }
             }
-            IdentifyOutcome::NotAnItem | IdentifyOutcome::Failed(_) => {
-                // TODO(F-01): 삼킨 휠 클릭을 SendInput으로 down·up 다시 보낸다
-                //   (MOUSEINPUT.dwExtraInfo = OWN_INPUT_MARK, 좌표 req.x/req.y).
-                if let IdentifyOutcome::Failed(reason) = &outcome {
-                    tracing::info!("항목 식별 실패, 원래 동작으로 통과: {reason}");
-                }
+            IdentifyOutcome::NotAnItem => {
+                tracing::debug!(identified_ms, "파일 항목이 아님, 휠 클릭 다시 보내기");
+                hook::replay(&result_gate);
+            }
+            IdentifyOutcome::Failed(reason) => {
+                // UIPI, COM 오류, 이름 판정 불가. 오류로 띄우지 않는다.
+                tracing::info!(
+                    identified_ms,
+                    "항목 식별 실패, 원래 동작으로 통과: {reason}"
+                );
+                hook::replay(&result_gate);
             }
         }
     })?;
@@ -249,6 +277,8 @@ fn start_trigger(app: &AppHandle) -> std::io::Result<TriggerHandles> {
     let coordinator = std::thread::Builder::new()
         .name("convtool-trigger".into())
         .spawn(move || {
+            // 마지막으로 삼킨 누름 시각. 떼기를 그 누름으로 연 메뉴에만 넘긴다.
+            let mut last_down: Option<std::time::Instant> = None;
             for ev in hrx {
                 match ev {
                     HookEvent::MButtonDown {
@@ -258,6 +288,7 @@ fn start_trigger(app: &AppHandle) -> std::io::Result<TriggerHandles> {
                         root_hwnd,
                         at,
                     } => {
+                        last_down = Some(at);
                         let sent = explorer.send(IdentifyRequest {
                             x,
                             y,
@@ -266,11 +297,14 @@ fn start_trigger(app: &AppHandle) -> std::io::Result<TriggerHandles> {
                             at,
                         });
                         if !sent {
-                            tracing::warn!("식별 스레드가 끝나 휠 클릭을 처리하지 못했습니다");
+                            tracing::warn!("식별 스레드가 끝나 휠 클릭을 다시 보냅니다");
+                            hook::replay(&gate);
                         }
                     }
                     HookEvent::MButtonUp { x, y, at } => {
-                        crate::overlay::on_mbutton_up(&app2, (x, y), at);
+                        if let Some(down) = last_down {
+                            crate::overlay::on_mbutton_up(&app2, (x, y), down, at);
+                        }
                     }
                 }
             }
@@ -290,6 +324,10 @@ fn shutdown(app: &AppHandle) {
     if let Some(t) = lock(&state.trigger).take() {
         t.stop();
     }
+    if let Some(w) = lock(&state.theme_watch).take() {
+        w.stop();
+    }
+    state.notifier.shutdown();
     if let Some(core) = state.take_core() {
         // 실행 중인 엔진 프로세스를 kill하고 작업 스레드를 join한다
         core.queue.shutdown();

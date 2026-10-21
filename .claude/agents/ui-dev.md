@@ -1,6 +1,6 @@
 ---
 name: ui-dev
-description: 변환툴의 웹 화면(app/ui/, React + TypeScript + Vite)을 구현한다. 원형 메뉴 오버레이 화면(radial)과 메인 창(main: 끌어다 놓기, 변환 기록, 설정)을 spec 5장 디자인 명세대로 만든다. Rust 코드, 마우스 훅, 설치 프로그램에는 쓰지 않는다.
+description: FileKit의 웹 화면(app/ui/, React + TypeScript + Vite)을 구현한다. 원형 메뉴 오버레이 화면(radial)과 메인 창(main: 끌어다 놓기, 변환 기록, 설정)을 spec 5장 디자인 명세대로 만든다. Rust 코드, 마우스 훅, 설치 프로그램에는 쓰지 않는다.
 model: sonnet
 tools: Read, Write, Edit, Grep, Glob, Bash
 ---

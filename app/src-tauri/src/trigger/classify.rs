@@ -3,6 +3,8 @@
 //! 훅 콜백(`hook.rs`)은 여기 함수만 부른다. 창 클래스 이름 읽기는 콜백이 하고, UIA·COM은 하지 않는다.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
 
 /// 커서 아래 창의 종류
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -132,15 +134,95 @@ pub enum HookDecision {
     SwallowUp,
 }
 
-/// 휠 버튼 상태를 기억하는 판정기. 훅 스레드 하나에서만 쓴다.
+/// 삼킨 휠 버튼 누름 하나의 진행 상태. 훅 스레드(떼기 판정)와 트리거 조정자(다시 보내기·메뉴)가 함께 쓴다.
+///
+/// 다시 보내기 순서 보장: 조정자는 **누름을 먼저 주입한 뒤** `replayed_down`을 부른다.
+/// - 그 전에 사용자가 이미 뗐으면(떼기를 훅이 삼킴) `true` → 조정자가 떼기도 주입한다.
+/// - 아직 누르고 있으면 `false` → 나중에 오는 진짜 떼기를 훅이 통과시킨다(앱이 누름→떼기 순서로 받는다).
+///
+/// 어느 순서로 끼어들어도 앱은 누름 다음 떼기를 정확히 한 번씩 받는다.
+#[derive(Debug, Default)]
+pub struct PressGate(AtomicU8);
+
+const GATE_IDLE: u8 = 0;
+/// 누름을 삼키고 식별을 기다리는 중
+const GATE_PENDING: u8 = 1;
+/// 식별 중에 떼기가 와서 삼켰다
+const GATE_UP_SWALLOWED: u8 = 2;
+/// 누름을 다시 보냈고 버튼은 아직 눌려 있다 → 진짜 떼기는 통과
+const GATE_REPLAYED: u8 = 3;
+/// 원형 메뉴를 열었다 → 떼기는 삼키고 제스처 판정으로 넘긴다
+const GATE_MENU: u8 = 4;
+
+impl PressGate {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn cas(&self, from: u8, to: u8) -> Result<u8, u8> {
+        self.0
+            .compare_exchange(from, to, Ordering::AcqRel, Ordering::Acquire)
+    }
+
+    /// 훅: 후보 창 위 누름을 삼켰다
+    pub fn begin(&self) {
+        self.0.store(GATE_PENDING, Ordering::Release);
+    }
+
+    /// 훅: 삼키지 않은 누름 (다른 창, 일시 중지)
+    pub fn reset(&self) {
+        self.0.store(GATE_IDLE, Ordering::Release);
+    }
+
+    /// 훅: 휠 버튼 떼기. `true`면 삼킨다.
+    pub fn on_up(&self) -> bool {
+        match self.cas(GATE_PENDING, GATE_UP_SWALLOWED) {
+            Ok(_) => true,
+            Err(GATE_MENU) => {
+                self.reset();
+                true
+            }
+            Err(_) => {
+                // REPLAYED(진짜 떼기를 앱에 보낸다), IDLE, UP_SWALLOWED(짝 없는 떼기)
+                self.reset();
+                false
+            }
+        }
+    }
+
+    /// 조정자: 누름을 다시 보낸 **뒤** 부른다. `true`면 떼기도 다시 보내야 한다.
+    pub fn replayed_down(&self) -> bool {
+        match self.cas(GATE_PENDING, GATE_REPLAYED) {
+            Ok(_) => false,
+            Err(_) => {
+                // 이미 뗐거나(UP_SWALLOWED) 상태가 바뀌었다. 보낸 누름의 짝을 반드시 맞춘다.
+                self.reset();
+                true
+            }
+        }
+    }
+
+    /// 조정자: 원형 메뉴를 열었다. 아직 누르고 있으면 떼기를 삼켜 제스처로 넘긴다.
+    pub fn menu_opened(&self) {
+        if self.cas(GATE_PENDING, GATE_MENU) == Err(GATE_UP_SWALLOWED) {
+            self.reset();
+        }
+    }
+}
+
+/// 휠 버튼 상태를 기억하는 판정기. 훅 스레드 하나에서만 쓴다(`PressGate`는 조정자와 공유).
 #[derive(Debug, Default)]
 pub struct ButtonTracker {
-    swallowed_down: bool,
+    gate: Arc<PressGate>,
 }
 
 impl ButtonTracker {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_gate(gate: Arc<PressGate>) -> Self {
+        Self { gate }
     }
 
     /// `classify_hit`은 휠 버튼 누름일 때만 부른다 (창 클래스 읽기 비용을 아끼려고).
@@ -157,21 +239,21 @@ impl ButtonTracker {
         }
         match msg {
             MouseMsg::MButtonDown => {
-                self.swallowed_down = false;
                 if paused {
+                    self.gate.reset();
                     return HookDecision::Pass;
                 }
                 let hit = classify_hit();
                 if hit.is_candidate() {
-                    self.swallowed_down = true;
+                    self.gate.begin();
                     HookDecision::SwallowDown(hit)
                 } else {
+                    self.gate.reset();
                     HookDecision::Pass
                 }
             }
             MouseMsg::MButtonUp => {
-                if self.swallowed_down {
-                    self.swallowed_down = false;
+                if self.gate.on_up() {
                     HookDecision::SwallowUp
                 } else {
                     HookDecision::Pass
@@ -419,5 +501,71 @@ mod tests {
             t.decide(MouseMsg::Other, 0, 0, false, || unreachable!()),
             HookDecision::Pass
         );
+    }
+
+    /// 다시 보내기: 식별 중에 사용자가 이미 뗐다 → 떼기도 주입해야 한다
+    #[test]
+    fn gate_replay_after_release_needs_up() {
+        let gate = Arc::new(PressGate::new());
+        let mut t = ButtonTracker::with_gate(gate.clone());
+        t.decide(MouseMsg::MButtonDown, 0, 0, false, || HitKind::Desktop);
+        assert_eq!(
+            t.decide(MouseMsg::MButtonUp, 0, 0, false, || unreachable!()),
+            HookDecision::SwallowUp
+        );
+        assert!(gate.replayed_down());
+        // 다음 떼기(짝 없음)는 통과
+        assert_eq!(
+            t.decide(MouseMsg::MButtonUp, 0, 0, false, || unreachable!()),
+            HookDecision::Pass
+        );
+    }
+
+    /// 다시 보내기: 아직 누르고 있다 → 진짜 떼기를 통과시킨다
+    #[test]
+    fn gate_replay_while_held_passes_real_up() {
+        let gate = Arc::new(PressGate::new());
+        let mut t = ButtonTracker::with_gate(gate.clone());
+        t.decide(MouseMsg::MButtonDown, 0, 0, false, || {
+            HitKind::ExplorerFileList
+        });
+        assert!(!gate.replayed_down());
+        assert_eq!(
+            t.decide(MouseMsg::MButtonUp, 0, 0, false, || unreachable!()),
+            HookDecision::Pass
+        );
+    }
+
+    /// 메뉴를 연 뒤의 떼기는 삼킨다 (제스처 판정)
+    #[test]
+    fn gate_menu_swallows_up() {
+        let gate = Arc::new(PressGate::new());
+        let mut t = ButtonTracker::with_gate(gate.clone());
+        t.decide(MouseMsg::MButtonDown, 0, 0, false, || HitKind::Desktop);
+        gate.menu_opened();
+        assert_eq!(
+            t.decide(MouseMsg::MButtonUp, 0, 0, false, || unreachable!()),
+            HookDecision::SwallowUp
+        );
+        assert_eq!(
+            t.decide(MouseMsg::MButtonUp, 0, 0, false, || unreachable!()),
+            HookDecision::Pass
+        );
+    }
+
+    /// 메뉴를 열기 전에 이미 뗐으면 상태를 비운다 (클릭 방식)
+    #[test]
+    fn gate_menu_after_release_resets() {
+        let gate = Arc::new(PressGate::new());
+        let mut t = ButtonTracker::with_gate(gate.clone());
+        t.decide(MouseMsg::MButtonDown, 0, 0, false, || HitKind::Desktop);
+        t.decide(MouseMsg::MButtonUp, 0, 0, false, || unreachable!());
+        gate.menu_opened();
+        assert_eq!(
+            t.decide(MouseMsg::MButtonUp, 0, 0, false, || unreachable!()),
+            HookDecision::Pass
+        );
+        // 그 뒤 다시 보내기를 부르면(호출 실수) 짝을 맞추도록 떼기 필요로 답한다
+        assert!(gate.replayed_down());
     }
 }

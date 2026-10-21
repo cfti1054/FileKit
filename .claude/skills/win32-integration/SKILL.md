@@ -1,6 +1,6 @@
 ---
 name: win32-integration
-description: 변환툴의 Windows 연동 구현법. 저수준 마우스 훅(WH_MOUSE_LL)으로 휠 클릭 가로채기와 다시 보내기, UI Automation과 IShellWindows·IFolderView2로 탐색기·바탕화면 파일 경로 얻기, Windows 11 탐색기 탭, 오버레이 창 설정, 트레이·토스트 알림·AUMID, 이름 있는 파이프, NSIS 설치와 HKCU 등록을 다룬다. app/src-tauri/나 installer/를 작업할 때 사용한다. 코어 변환 로직이나 React 화면에는 쓰지 않는다.
+description: FileKit의 Windows 연동 구현법. 저수준 마우스 훅(WH_MOUSE_LL)으로 휠 클릭 가로채기와 다시 보내기, UI Automation과 IShellWindows·IFolderView2로 탐색기·바탕화면 파일 경로 얻기, Windows 11 탐색기 탭, 오버레이 창 설정, 트레이·토스트 알림·AUMID, 이름 있는 파이프, NSIS 설치와 HKCU 등록을 다룬다. app/src-tauri/나 installer/를 작업할 때 사용한다. 코어 변환 로직이나 React 화면에는 쓰지 않는다.
 ---
 
 # Windows 연동 구현법
@@ -55,7 +55,7 @@ spec 4장(휠 클릭 트리거)과 6장(설치와 통합)을 구현할 때의 �
 ## 설치와 등록 (installer/)
 
 - Tauri 번들러의 NSIS, `installMode: "currentUser"`. 모든 등록은 `HKCU`.
-- 등록 항목과 경로는 spec 6장 표를 그대로 따른다. 제거 시 모두 지우고 `%APPDATA%\변환툴` 삭제 여부를 묻는다. 변환 결과 파일은 지우지 않는다.
+- 등록 항목과 경로는 spec 6장 표를 그대로 따른다. 제거 시 모두 지우고 `%APPDATA%\FileKit` 삭제 여부를 묻는다. 변환 결과 파일은 지우지 않는다.
 - 레지스트리 경로·명령 문자열 생성은 순수 함수나 NSIS 매크로 한 곳에 모은다. 작성만 하고 이 환경에서 실제 레지스트리를 바꾸지 않는다.
 
 ## 수동 확인 목록 (보고에 포함)

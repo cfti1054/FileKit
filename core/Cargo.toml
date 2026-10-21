@@ -1,6 +1,6 @@
 [package]
 name = "convtool-core"
-description = "변환툴 변환 코어 (형식 판정, 프리셋, 작업 큐, 엔진 어댑터)"
+description = "FileKit 변환 코어 (형식 판정, 프리셋, 작업 큐, 엔진 어댑터)"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

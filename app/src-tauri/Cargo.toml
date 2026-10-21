@@ -1,6 +1,6 @@
 [package]
 name = "convtool-app"
-description = "변환툴 트레이 앱 (휠 클릭 트리거, 원형 메뉴 오버레이, 파이프 서버)"
+description = "FileKit 트레이 앱 (휠 클릭 트리거, 원형 메뉴 오버레이, 파이프 서버)"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -54,6 +54,12 @@ windows = { version = "0.58", features = [
     "Win32_System_Threading",
     "Win32_System_Registry",
     "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_System_LibraryLoader",
+    "Foundation",
+    "Foundation_Collections",
+    "Data_Xml_Dom",
+    "UI_Notifications",
 ] }
 
 [build-dependencies]

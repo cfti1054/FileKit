@@ -1,8 +1,8 @@
 //! 앱 실행 인자. 순수 로직(clap)이라 tauri 없이 테스트한다.
 //!
-//! - `변환툴.exe`                     → 창 모드
-//! - `변환툴.exe --tray`              → 트레이 상주 (시작 시 실행 Run 키)
-//! - `변환툴.exe convert <파일...> --ask` → 우클릭 메뉴 (트레이가 있으면 파이프 `show_menu`)
+//! - `FileKit.exe`                     → 창 모드
+//! - `FileKit.exe --tray`              → 트레이 상주 (시작 시 실행 Run 키)
+//! - `FileKit.exe convert <파일...> --ask` → 우클릭 메뉴 (트레이가 있으면 파이프 `show_menu`)
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -18,9 +18,9 @@ pub enum AppMode {
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "변환툴",
+    name = "FileKit",
     version,
-    about = "변환툴 트레이 앱",
+    about = "FileKit 트레이 앱",
     args_conflicts_with_subcommands = true
 )]
 struct Cli {
@@ -63,17 +63,20 @@ mod tests {
 
     #[test]
     fn no_args_is_window() {
-        assert_eq!(parse_from(["변환툴.exe"]).unwrap(), AppMode::Window);
+        assert_eq!(parse_from(["FileKit.exe"]).unwrap(), AppMode::Window);
     }
 
     #[test]
     fn tray_flag() {
-        assert_eq!(parse_from(["변환툴.exe", "--tray"]).unwrap(), AppMode::Tray);
+        assert_eq!(
+            parse_from(["FileKit.exe", "--tray"]).unwrap(),
+            AppMode::Tray
+        );
     }
 
     #[test]
     fn convert_ask_keeps_spaces_and_korean() {
-        let m = parse_from(["변환툴.exe", "convert", r"C:\영상\발표 녹화.mov", "--ask"]).unwrap();
+        let m = parse_from(["FileKit.exe", "convert", r"C:\영상\발표 녹화.mov", "--ask"]).unwrap();
         assert_eq!(
             m,
             AppMode::ConvertAsk {

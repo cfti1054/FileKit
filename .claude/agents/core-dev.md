@@ -1,6 +1,6 @@
 ---
 name: core-dev
-description: 변환툴의 Rust 코어 라이브러리(core/)와 CLI(cli/, convtool.exe), Cargo 워크스페이스를 구현한다. 작업 큐, 형식 판정, 프리셋, 출력 이름 규칙, 엔진 어댑터(FFmpeg, libvips, LibreOffice, Pandoc), CLI 명령과 종료 코드, JSON 진행 이벤트를 다룬다. 화면, 마우스 훅, 설치 프로그램 작업에는 쓰지 않는다.
+description: FileKit의 Rust 코어 라이브러리(core/)와 CLI(cli/, convtool.exe), Cargo 워크스페이스를 구현한다. 작업 큐, 형식 판정, 프리셋, 출력 이름 규칙, 엔진 어댑터(FFmpeg, libvips, LibreOffice, Pandoc), CLI 명령과 종료 코드, JSON 진행 이벤트를 다룬다. 화면, 마우스 훅, 설치 프로그램 작업에는 쓰지 않는다.
 model: opus
 tools: Read, Write, Edit, Grep, Glob, Bash
 ---

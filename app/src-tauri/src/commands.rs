@@ -52,7 +52,13 @@ pub fn get_presets() -> Vec<PresetInfo> {
 
 #[tauri::command(rename_all = "snake_case")]
 pub fn get_launch_files(state: State<'_, AppState>) -> Vec<PathBuf> {
-    std::mem::take(&mut *lock(&state.launch_files))
+    // 메인 창 페이지가 떴다는 신호이기도 하다. 이 뒤의 show_main_window{files}는 main:open_files로 보낸다.
+    // 페이지는 main:open_files를 listen한 뒤에 이 명령을 불러야 파일을 놓치지 않는다.
+    let mut files = lock(&state.launch_files);
+    state
+        .main_ready
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    std::mem::take(&mut *files)
 }
 
 #[tauri::command(rename_all = "snake_case")]

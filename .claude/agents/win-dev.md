@@ -1,6 +1,6 @@
 ---
 name: win-dev
-description: 변환툴의 Windows 연동을 구현한다. Tauri 앱의 Rust 쪽(app/src-tauri/) — 저수준 마우스 훅, UI Automation과 IShellWindows로 탐색기 파일 식별, 원형 메뉴 오버레이 창, 트레이, 알림, 이름 있는 파이프 서버, 단일 인스턴스 — 과 설치 프로그램(installer/, NSIS 훅, HKCU 레지스트리, AUMID)을 맡는다. 코어 변환 로직과 React 화면에는 쓰지 않는다.
+description: FileKit의 Windows 연동을 구현한다. Tauri 앱의 Rust 쪽(app/src-tauri/) — 저수준 마우스 훅, UI Automation과 IShellWindows로 탐색기 파일 식별, 원형 메뉴 오버레이 창, 트레이, 알림, 이름 있는 파이프 서버, 단일 인스턴스 — 과 설치 프로그램(installer/, NSIS 훅, HKCU 레지스트리, AUMID)을 맡는다. 코어 변환 로직과 React 화면에는 쓰지 않는다.
 model: opus
 tools: Read, Write, Edit, Grep, Glob, Bash
 ---

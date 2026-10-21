@@ -1,11 +1,13 @@
-//! 저수준 마우스 훅 스레드.
+//! 저수준 마우스 훅 스레드와 삼킨 클릭 다시 보내기.
 //!
 //! 훅 콜백은 설치한 스레드의 메시지 루프에서 불린다. 그래서 전용 스레드가 `GetMessageW` 루프를 돈다.
 //! 콜백 안에서는 창 클래스 확인(`classify_point`)과 채널 전송만 한다. UIA·COM은 `explorer` 스레드가 한다.
+//! 로그·잠금도 하지 않는다(`LowLevelHooksTimeout`을 넘기면 Windows가 훅을 조용히 끊는다).
 //!
-//! **지금은 훅을 설치하지 않는다(TODO(F-01)).** 항목 식별(`explorer::identify`)이 TODO인 상태에서
-//! 휠 클릭을 삼키면 탐색기·바탕화면에서 사용자의 휠 클릭이 그냥 사라지기 때문이다.
-//! 스레드와 메시지 루프, 판정(`classify::ButtonTracker`)과 이벤트 채널까지만 만들어 둔다.
+//! 휠 버튼 누름을 삼킨 뒤의 흐름:
+//! - 파일이면 원형 메뉴(`PressGate::menu_opened`), 짝 떼기는 삼켜 제스처 판정으로 넘긴다.
+//! - 파일이 아니거나 식별에 실패하면 `replay`로 누름(필요하면 떼기도)을 `SendInput`으로 다시 보낸다.
+//!   `dwExtraInfo = OWN_INPUT_MARK`라 훅이 다시 삼키지 않는다.
 
 use std::time::Instant;
 
@@ -32,6 +34,7 @@ pub use win::*;
 
 #[cfg(windows)]
 mod win {
+    use std::cell::RefCell;
     use std::io;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::mpsc::{self, Sender};
@@ -39,19 +42,26 @@ mod win {
     use std::thread::JoinHandle;
     use std::time::Instant;
 
-    use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
+    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::System::Threading::GetCurrentThreadId;
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
+        MOUSEINPUT, MOUSE_EVENT_FLAGS,
+    };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetAncestor, GetClassNameW, GetMessageW, PeekMessageW, PostThreadMessageW, WindowFromPoint,
-        GA_ROOT, MSG, PM_NOREMOVE, WM_QUIT,
+        CallNextHookEx, GetAncestor, GetClassNameW, GetMessageW, PeekMessageW, PostThreadMessageW,
+        SetWindowsHookExW, UnhookWindowsHookEx, WindowFromPoint, GA_ROOT, HC_ACTION, MSG,
+        MSLLHOOKSTRUCT, PM_NOREMOVE, WH_MOUSE_LL, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_QUIT,
     };
 
     use super::HookEvent;
     use crate::trigger::classify::{
-        classify_utf16, ButtonTracker, HitKind, HookDecision, MouseMsg, CLASS_NAME_BUF_LEN,
+        classify_utf16, ButtonTracker, HitKind, HookDecision, MouseMsg, PressGate,
+        CLASS_NAME_BUF_LEN, OWN_INPUT_MARK,
     };
 
-    /// 훅 콜백이 쓰는 상태. 훅 스레드 안에서만 산다(thread_local로 둘 예정).
+    /// 훅 콜백이 쓰는 상태. 훅 스레드의 thread_local에만 산다.
     pub struct HookContext {
         tracker: ButtonTracker,
         tx: Sender<HookEvent>,
@@ -59,9 +69,9 @@ mod win {
     }
 
     impl HookContext {
-        pub fn new(tx: Sender<HookEvent>, paused: Arc<AtomicBool>) -> Self {
+        pub fn new(tx: Sender<HookEvent>, paused: Arc<AtomicBool>, gate: Arc<PressGate>) -> Self {
             Self {
-                tracker: ButtonTracker::new(),
+                tracker: ButtonTracker::with_gate(gate),
                 tx,
                 paused,
             }
@@ -77,6 +87,7 @@ mod win {
             flags: u32,
             extra_info: usize,
         ) -> HookDecision {
+            // 트레이 "원형 메뉴 일시 중지"면 창 클래스도 읽지 않고 바로 통과한다.
             let paused = self.paused.load(Ordering::Relaxed);
             let mut root = 0isize;
             let decision = self.tracker.decide(msg, flags, extra_info, paused, || {
@@ -103,6 +114,45 @@ mod win {
             }
             decision
         }
+    }
+
+    thread_local! {
+        static CTX: RefCell<Option<HookContext>> = const { RefCell::new(None) };
+    }
+
+    /// `WH_MOUSE_LL` 콜백. 휠 버튼 누름·떼기만 본다.
+    unsafe extern "system" fn low_level_mouse_proc(
+        code: i32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+    ) -> LRESULT {
+        if code == HC_ACTION as i32 {
+            let msg = match wparam.0 as u32 {
+                WM_MBUTTONDOWN => MouseMsg::MButtonDown,
+                WM_MBUTTONUP => MouseMsg::MButtonUp,
+                _ => MouseMsg::Other,
+            };
+            if msg != MouseMsg::Other && lparam.0 != 0 {
+                // SAFETY: HC_ACTION일 때 lparam은 MSLLHOOKSTRUCT를 가리킨다(문서 계약).
+                let info = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
+                let decision = CTX.with(|c| {
+                    // 재진입(콜백 안에서 다시 콜백)은 없지만, 있더라도 패닉 대신 통과시킨다.
+                    c.try_borrow_mut().ok().and_then(|mut ctx| {
+                        ctx.as_mut().map(|ctx| {
+                            ctx.on_mouse(msg, info.pt.x, info.pt.y, info.flags, info.dwExtraInfo)
+                        })
+                    })
+                });
+                if matches!(
+                    decision,
+                    Some(HookDecision::SwallowDown(_) | HookDecision::SwallowUp)
+                ) {
+                    return LRESULT(1);
+                }
+            }
+        }
+        // SAFETY: 받은 인자를 그대로 넘긴다. 첫 인자(hhk)는 무시된다.
+        unsafe { CallNextHookEx(None, code, wparam, lparam) }
     }
 
     /// 창 클래스 이름을 호출자의 스택 버퍼에 읽어 NUL을 뺀 슬라이스로 돌려준다. 힙 할당 없음.
@@ -133,15 +183,65 @@ mod win {
         (kind, root.0 as isize)
     }
 
+    fn middle_input(flags: MOUSE_EVENT_FLAGS) -> INPUT {
+        INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dx: 0,
+                    dy: 0,
+                    mouseData: 0,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: OWN_INPUT_MARK,
+                },
+            },
+        }
+    }
+
+    fn send_middle(flags: MOUSE_EVENT_FLAGS) -> bool {
+        let input = [middle_input(flags)];
+        // SAFETY: input은 유효한 INPUT 배열이고 cbsize는 INPUT 크기다.
+        let n = unsafe { SendInput(&input, std::mem::size_of::<INPUT>() as i32) };
+        n == 1
+    }
+
+    /// 삼킨 휠 클릭을 원래 동작으로 되살린다. 커서는 옮기지 않는다(지금 커서 위치에 주입).
+    ///
+    /// 누름을 먼저 주입한 뒤 `PressGate`로 버튼이 아직 눌려 있는지 판정한다(순서 보장은 `PressGate` 문서).
+    /// UIPI로 관리자 권한 창에 주입이 막혀도 오류로 띄우지 않고 로그만 남긴다.
+    pub fn replay(gate: &PressGate) {
+        if !send_middle(MOUSEEVENTF_MIDDLEDOWN) {
+            tracing::info!("휠 클릭 다시 보내기 실패 (SendInput 누름, UIPI 가능성)");
+        }
+        if gate.replayed_down() && !send_middle(MOUSEEVENTF_MIDDLEUP) {
+            tracing::info!("휠 클릭 다시 보내기 실패 (SendInput 떼기)");
+        }
+    }
+
     /// 훅 스레드 핸들. `stop`이나 Drop에서 `WM_QUIT`을 보내고 join한다.
     pub struct HookThread {
         thread_id: u32,
         join: Option<JoinHandle<()>>,
     }
 
-    /// 훅 스레드를 시작한다. 지금은 메시지 루프만 돌고 훅은 설치하지 않는다(TODO(F-01)).
-    pub fn start(tx: Sender<HookEvent>, paused: Arc<AtomicBool>) -> io::Result<HookThread> {
-        let (id_tx, id_rx) = mpsc::channel::<u32>();
+    /// 훅 스레드를 시작하고 `WH_MOUSE_LL`을 설치한다. 스레드가 끝날 때(앱 종료) 반드시 해제한다.
+    pub fn start(
+        tx: Sender<HookEvent>,
+        paused: Arc<AtomicBool>,
+        gate: Arc<PressGate>,
+    ) -> io::Result<HookThread> {
+        spawn(tx, paused, gate, true)
+    }
+
+    /// `install = false`는 테스트용(사용자 입력을 가로채지 않고 메시지 루프만 돈다).
+    fn spawn(
+        tx: Sender<HookEvent>,
+        paused: Arc<AtomicBool>,
+        gate: Arc<PressGate>,
+        install: bool,
+    ) -> io::Result<HookThread> {
+        let (id_tx, id_rx) = mpsc::channel::<io::Result<u32>>();
         let join = std::thread::Builder::new()
             .name("convtool-hook".into())
             .spawn(move || {
@@ -150,36 +250,50 @@ mod win {
                 unsafe {
                     let _ = PeekMessageW(&mut msg, HWND::default(), 0, 0, PM_NOREMOVE);
                 }
-                // SAFETY: 인자 없는 조회.
-                let _ = id_tx.send(unsafe { GetCurrentThreadId() });
+                CTX.with(|c| *c.borrow_mut() = Some(HookContext::new(tx, paused, gate)));
 
-                let _ctx = HookContext::new(tx, paused);
-                // TODO(F-01): 훅 설치. explorer::identify가 구현된 뒤에 연다.
-                //   thread_local! { static CTX: RefCell<Option<HookContext>> }에 _ctx를 넣고
-                //   let hook = SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), HINSTANCE(모듈), 0)?;
-                //   low_level_mouse_proc(code, wparam, lparam):
-                //     code < 0 → CallNextHookEx
-                //     wparam = WM_MBUTTONDOWN/WM_MBUTTONUP → MSLLHOOKSTRUCT(pt, flags, dwExtraInfo)로
-                //     CTX.on_mouse(...) → Pass면 CallNextHookEx, 아니면 LRESULT(1)
-                //   콜백 안에서 로그·잠금·할당을 하지 않는다(LowLevelHooksTimeout 넘기면 Windows가 훅을 끊는다).
-                //   루프가 끝나면 UnhookWindowsHookEx(hook). 앱 종료 시 반드시 해제(spec 6장 "앱 종료 시 해제").
-                //   UIPI: 관리자 권한 창 위의 입력은 오지 않는다. 오류로 띄우지 않는다.
-                tracing::info!(
-                    "훅 스레드 시작 (WH_MOUSE_LL 설치는 TODO(F-01): 휠 클릭을 가로채지 않음)"
-                );
+                let hook = if install {
+                    // SAFETY: 콜백은 이 모듈의 extern "system" 함수이고, 모듈 핸들은 이 exe다.
+                    let r = unsafe {
+                        GetModuleHandleW(None).and_then(|m| {
+                            SetWindowsHookExW(WH_MOUSE_LL, Some(low_level_mouse_proc), m, 0)
+                        })
+                    };
+                    match r {
+                        Ok(h) => Some(h),
+                        Err(e) => {
+                            let _ = id_tx
+                                .send(Err(io::Error::other(format!("WH_MOUSE_LL 설치 실패: {e}"))));
+                            return;
+                        }
+                    }
+                } else {
+                    None
+                };
+                // SAFETY: 인자 없는 조회.
+                let _ = id_tx.send(Ok(unsafe { GetCurrentThreadId() }));
+                tracing::info!(installed = hook.is_some(), "훅 스레드 시작");
 
                 loop {
                     // SAFETY: msg는 유효한 출력 버퍼. WM_QUIT이면 0, 오류면 -1.
+                    // 훅 콜백은 이 GetMessageW 안에서 불린다. 이 스레드에는 창이 없어 Dispatch할 것이 없다.
                     let r = unsafe { GetMessageW(&mut msg, HWND::default(), 0, 0) };
                     if r.0 == 0 || r.0 == -1 {
                         break;
                     }
                 }
+                if let Some(h) = hook {
+                    // SAFETY: 위에서 설치한 훅. 앱 종료 시 해제(spec 6장).
+                    if let Err(e) = unsafe { UnhookWindowsHookEx(h) } {
+                        tracing::warn!("WH_MOUSE_LL 해제 실패: {e}");
+                    }
+                }
+                CTX.with(|c| c.borrow_mut().take());
                 tracing::info!("훅 스레드 종료");
             })?;
         let thread_id = id_rx
             .recv()
-            .map_err(|_| io::Error::other("훅 스레드가 ID를 보내기 전에 끝났습니다"))?;
+            .map_err(|_| io::Error::other("훅 스레드가 ID를 보내기 전에 끝났습니다"))??;
         Ok(HookThread {
             thread_id,
             join: Some(join),
@@ -216,16 +330,26 @@ mod win {
         use super::*;
 
         #[test]
-        fn thread_starts_and_stops() {
+        fn thread_starts_and_stops_without_hook() {
             let (tx, _rx) = mpsc::channel();
-            let t = start(tx, Arc::new(AtomicBool::new(false))).unwrap();
+            let t = spawn(
+                tx,
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(PressGate::new()),
+                false,
+            )
+            .unwrap();
             t.stop();
         }
 
         #[test]
-        fn context_sends_events_for_candidates_only() {
+        fn context_paused_passes_without_events() {
             let (tx, rx) = mpsc::channel();
-            let mut ctx = HookContext::new(tx, Arc::new(AtomicBool::new(true)));
+            let mut ctx = HookContext::new(
+                tx,
+                Arc::new(AtomicBool::new(true)),
+                Arc::new(PressGate::new()),
+            );
             // 일시 중지 중이면 classify_point를 부르지 않고 통과
             assert_eq!(
                 ctx.on_mouse(MouseMsg::MButtonDown, 0, 0, 0, 0),
@@ -236,6 +360,16 @@ mod win {
                 HookDecision::Pass
             );
             assert!(rx.try_recv().is_err());
+        }
+
+        #[test]
+        fn replay_input_is_marked() {
+            let i = middle_input(MOUSEEVENTF_MIDDLEDOWN);
+            assert_eq!(i.r#type, INPUT_MOUSE);
+            // SAFETY: 위에서 mi로 만든 값
+            let mi = unsafe { i.Anonymous.mi };
+            assert_eq!(mi.dwExtraInfo, OWN_INPUT_MARK);
+            assert_eq!(mi.dwFlags, MOUSEEVENTF_MIDDLEDOWN);
         }
     }
 }

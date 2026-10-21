@@ -1,4 +1,4 @@
-//! 변환툴 변환 코어 (`convtool-core`).
+//! FileKit 변환 코어 (`convtool-core`).
 //!
 //! UI·Tauri·Win32 UI 코드를 넣지 않는다. 같은 코어를 설치형 앱, CLI, 나중의 웹 서버가 함께 쓴다.
 

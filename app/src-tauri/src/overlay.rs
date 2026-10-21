@@ -121,14 +121,20 @@ fn monitor_at(app: &AppHandle, cursor: (i32, i32)) -> (Rect, f64) {
     }
 }
 
-fn theme_for_open(app: &AppHandle) -> ThemeInfo {
+/// 지금 시스템 테마를 읽고, 마지막으로 본 값과 다르면 `theme:changed`를 모든 창에 보낸다.
+///
+/// 테마 감시 스레드(`theme::watch`, WM_SETTINGCHANGE·강조색 변경)와 메뉴 열기에서 부른다.
+/// WM_SETTINGCHANGE는 한 번 바꿀 때 여러 번 오므로 값이 바뀐 때만 보낸다.
+pub fn refresh_theme(app: &AppHandle) -> ThemeInfo {
     use std::sync::OnceLock;
     static LAST: OnceLock<std::sync::Mutex<Option<ThemeInfo>>> = OnceLock::new();
     let theme = crate::theme::current();
     let mut last = lock(LAST.get_or_init(Default::default));
     if last.as_ref().is_some_and(|t| *t != theme) {
-        // TODO: WM_SETTINGCHANGE를 받아 바로 보내기. 지금은 메뉴를 열 때 바뀐 것을 알린다.
-        let _ = app.emit(EV_THEME, theme.clone());
+        tracing::info!(?theme, "시스템 테마 변경");
+        if let Err(e) = app.emit(EV_THEME, theme.clone()) {
+            tracing::warn!("theme:changed 보내기 실패: {e}");
+        }
     }
     *last = Some(theme.clone());
     theme
@@ -176,7 +182,7 @@ pub fn open_menu(
     win.set_size(LogicalSize::new(OVERLAY_CSS_SIZE, OVERLAY_CSS_SIZE))
         .map_err(internal)?;
 
-    let theme = theme_for_open(app);
+    let theme = refresh_theme(app);
     let session_files: Vec<PathBuf> = report.files.iter().map(|f| f.path.clone()).collect();
 
     let (payload, superseded) = {
@@ -228,8 +234,8 @@ pub fn open_menu(
 }
 
 /// 훅이 받은 휠 버튼 떼기 → `radial:mbutton_up` (제스처 방식)
-pub fn on_mbutton_up(app: &AppHandle, screen: (i32, i32), at: Instant) {
-    let payload = lock(&app.state::<AppState>().sessions).mbutton_up(screen, at);
+pub fn on_mbutton_up(app: &AppHandle, screen: (i32, i32), press_down: Instant, at: Instant) {
+    let payload = lock(&app.state::<AppState>().sessions).mbutton_up(screen, press_down, at);
     if let Some(p) = payload {
         if let Err(e) = app.emit_to(WINDOW_RADIAL, EV_RADIAL_MBUTTON_UP, p) {
             tracing::warn!("radial:mbutton_up 보내기 실패: {e}");

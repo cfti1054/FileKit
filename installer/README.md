@@ -8,38 +8,40 @@ Tauri 번들러(NSIS)로 설치 파일을 만들 때 쓰는 훅 스크립트다.
 
 | 파일 | 내용 |
 | --- | --- |
-| `hooks.nsh` | `NSIS_HOOK_POSTINSTALL`(등록)과 `NSIS_HOOK_POSTUNINSTALL`(삭제, 설정 폴더 삭제 여부 묻기). UTF-8 BOM으로 저장한다. |
+| `hooks.nsh` | 기본 설치 폴더 바꾸기(`.onGUIInit`, `NSIS_HOOK_PREINSTALL`), `NSIS_HOOK_POSTINSTALL`(등록, 이전 이름 정리)과 `NSIS_HOOK_POSTUNINSTALL`(삭제, 설정 폴더 삭제 여부 묻기). UTF-8 BOM으로 저장한다. |
 | `licenses/THIRD-PARTY-NOTICES.txt` | FFmpeg·libvips·Pandoc 고지와 소스 위치. 설치 폴더 `licenses\`로 복사된다. 엔진 버전을 바꾸면 같이 고친다. |
 | `../app/src-tauri/tauri.release.conf.json` | 릴리스 빌드에만 병합하는 설정. `externalBin`(convtool 사이드카)과 `resources`(`engines/`, `licenses/`). |
 
 ## 설치 폴더 배치
 
 ```
-%LOCALAPPDATA%\변환툴\
-├─ 변환툴.exe          트레이 앱 (cargo bin convtool-app, mainBinaryName)
+%LOCALAPPDATA%\Programs\FileKit\
+├─ FileKit.exe         트레이 앱 (cargo bin convtool-app, mainBinaryName)
 ├─ convtool.exe        CLI 사이드카 (binaries/convtool-<triple>.exe, 번들러가 접미사를 뗌)
 ├─ uninstall.exe
 ├─ engines\            저장소 engines/ 그대로 (VERSIONS.json, ffmpeg\bin\, vips\bin\, pandoc\). LibreOffice 없음
 └─ licenses\THIRD-PARTY-NOTICES.txt
 ```
 
-`convtool.exe`와 `변환툴.exe`는 `<exe 폴더>\engines`에서 엔진을 찾으므로(core `EngineConfig::from_env`) 설치본에 따로 설정이 없다.
+`convtool.exe`와 `FileKit.exe`는 `<exe 폴더>\engines`에서 엔진을 찾으므로(core `EngineConfig::from_env`) 설치본에 따로 설정이 없다.
 
 ## 등록 항목 (모두 HKCU, spec 6장)
 
 | 기능 | 위치 | 누가 만드나 |
 | --- | --- | --- |
-| 시작 시 실행 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 값 `변환툴` = `"<설치 폴더>\변환툴.exe" --tray` | `hooks.nsh` |
-| 우클릭 메뉴 | `HKCU\Software\Classes\*\shell\변환툴` (`MUIVerb`, `Icon`, `MultiSelectModel=Player`, `command` = `"<설치 폴더>\변환툴.exe" convert "%1" --ask`) | `hooks.nsh` |
-| 알림 AUMID | `HKCU\Software\Classes\AppUserModelId\com.filekit.convtool` (`DisplayName`=`변환툴`, `IconUri`) | `hooks.nsh` |
+| 시작 시 실행 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` 값 `FileKit` = `"<설치 폴더>\FileKit.exe" --tray` | `hooks.nsh` |
+| 우클릭 메뉴 | `HKCU\Software\Classes\*\shell\FileKit` (`MUIVerb`, `Icon`, `MultiSelectModel=Player`, `command` = `"<설치 폴더>\FileKit.exe" convert "%1" --ask`) | `hooks.nsh` |
+| 알림 AUMID | `HKCU\Software\Classes\AppUserModelId\com.filekit.convtool` (`DisplayName`=`FileKit`, `IconUri`) | `hooks.nsh` |
 | 제거 정보 | `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\<identifier 또는 productName>` | Tauri NSIS 템플릿 |
-| 바탕화면·시작 메뉴 바로가기 | `%USERPROFILE%\Desktop\변환툴.lnk`, 시작 메뉴 | Tauri NSIS 템플릿 |
+| 바탕화면·시작 메뉴 바로가기 | `%USERPROFILE%\Desktop\FileKit.lnk`, 시작 메뉴 | Tauri NSIS 템플릿 |
 | 휠 클릭 원형 메뉴 | 레지스트리 없음. 트레이 프로세스가 실행 중에 훅을 설치하고 종료 시 해제 | 앱 |
 
-설치 위치 기본값은 currentUser 모드의 `%LOCALAPPDATA%\<productName>`(= `%LOCALAPPDATA%\변환툴`)이다.
-spec 6장의 `%LOCALAPPDATA%\Programs\변환툴`과 다를 수 있다(확인 필요, 아래).
+설치 위치 기본값은 spec 6장의 `%LOCALAPPDATA%\Programs\FileKit`이다. Tauri currentUser 템플릿의 기본값은
+`%LOCALAPPDATA%\<productName>`이라서 `hooks.nsh`가 바꾼다: 화면 설치는 `MUI_CUSTOMFUNCTION_GUIINIT`(폴더 선택 화면 전),
+무음 설치는 `NSIS_HOOK_PREINSTALL`. `/D=`로 지정했거나 이전 설치 위치를 이어받으면 그대로 둔다.
+설치할 때 이전 이름(`변환툴`)의 Run 값과 `*\shell\변환툴` 키를 지운다.
 
-제거하면 위 HKCU 항목을 지우고, `%APPDATA%\변환툴`이 있으면 삭제 여부를 `MB_YESNO`로 묻는다.
+제거하면 위 HKCU 항목을 지우고, `%APPDATA%\FileKit`이 있으면 삭제 여부를 `MB_YESNO`로 묻는다.
 무음 제거(`/S`, Tauri 업데이트 포함)는 묻지 않고 남긴다. 변환 결과 파일은 원본 폴더에 있으므로 지우지 않는다.
 
 ## 만들기
@@ -65,7 +67,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1 
    `app/src-tauri/binaries/convtool-<host triple>.exe`로 복사. `$env:CARGO_TARGET_DIR`를 따른다.
 4. `app/ui`에서 `npm ci` (`node_modules`가 없을 때만).
 5. `app/src-tauri`에서 `../ui/node_modules/.bin/tauri build --config tauri.release.conf.json -- --locked`.
-6. `<target>/release/bundle/nsis/변환툴_<ver>_x64-setup.exe`를 `dist/FileKit_<ver>_x64-setup.exe`로 복사하고
+6. `<target>/release/bundle/nsis/FileKit_<ver>_x64-setup.exe`를 `dist/FileKit_<ver>_x64-setup.exe`로 복사하고
    `dist/FileKit_<ver>_x64-setup.exe.sha256`(`<hex>  <파일명>`)을 쓴다. GitHub Release가 비ASCII 자산 이름을 바꾸므로 배포 이름은 ASCII다.
 7. `git diff --exit-code Cargo.lock` — 빌드가 잠금 파일을 바꾸지 않았는지.
 
@@ -93,21 +95,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-installer.ps1 
 레지스트리는 **읽기만** 해서 확인한다.
 
 ```powershell
-reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v 변환툴
-reg query "HKCU\Software\Classes\*\shell\변환툴" /s
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v FileKit
+reg query "HKCU\Software\Classes\*\shell\FileKit" /s
 reg query "HKCU\Software\Classes\AppUserModelId\com.filekit.convtool"
-reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall" /s /f 변환툴
+reg query "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall" /s /f FileKit
 ```
 
-- 탐색기에서 파일 우클릭(Windows 11은 "추가 옵션 표시") → "변환툴로 변환" → 트레이가 실행 중이면 커서 위치에 원형 메뉴,
+- 탐색기에서 파일 우클릭(Windows 11은 "추가 옵션 표시") → "FileKit으로 변환" → 트레이가 실행 중이면 커서 위치에 원형 메뉴,
   없으면 메인 창에 그 파일이 들어간다.
-- "앱 및 기능"에 변환툴이 보이고, 제거 후 위 `reg query`가 모두 "찾을 수 없음"인지.
-- 제거 시 `%APPDATA%\변환툴` 삭제 질문이 나오는지, "아니요"면 폴더가 남는지.
+- "앱 및 기능"에 FileKit이 보이고, 제거 후 위 `reg query`가 모두 "찾을 수 없음"인지.
+- 제거 시 `%APPDATA%\FileKit` 삭제 질문이 나오는지, "아니요"면 폴더가 남는지.
 - 관리자 권한 요청(UAC)이 한 번도 뜨지 않는지.
 
 ## 확인 필요
 
-- `mainBinaryName`에 한글(`변환툴`)을 쓸 때 NSIS 템플릿·바로가기·Uninstall 키 이름이 정상인지(번들을 실제로 만들어 보지 못함).
-- 설치 위치(`%LOCALAPPDATA%\변환툴` vs spec의 `%LOCALAPPDATA%\Programs\변환툴`).
+- 화면 설치의 폴더 선택 화면 기본값이 `%LOCALAPPDATA%\Programs\FileKit`으로 나오는지(`.onGUIInit` 대체, 번들을 실제로 만들어 보지 못함).
+- 이전 이름(변환툴)으로 설치한 PC: 새 설치가 `변환툴` Run 값과 `*\shell\변환툴`을 지우는지. 이전 설치의 Uninstall 항목·폴더는 따로 제거해야 한다.
 - 구성 요소 선택 페이지(엔진·바로가기·우클릭·휠 클릭·시작 시 실행 선택)는 기본 템플릿 훅만으로는 만들 수 없다.
   커스텀 NSIS 템플릿(`bundle.windows.nsis.template`)이 필요하다. 지금은 모든 통합을 기본으로 등록한다.

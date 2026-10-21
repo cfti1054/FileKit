@@ -1,6 +1,6 @@
 [package]
 name = "convtool-cli"
-description = "변환툴 명령줄 도구 (convtool.exe)"
+description = "FileKit 명령줄 도구 (convtool.exe)"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

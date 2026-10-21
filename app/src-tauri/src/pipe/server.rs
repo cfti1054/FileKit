@@ -2,9 +2,8 @@
 //!
 //! - 첫 인스턴스를 `first_pipe_instance(true)`로 만들어 단일 인스턴스를 판정한다. 실패하면 이미 실행 중.
 //! - `reject_remote_clients(true)` (`PIPE_REJECT_REMOTE_CLIENTS`).
-//! - TODO: 현재 사용자만 접근하는 보안 설명자(SDDL `D:P(A;;GA;;;<사용자 SID>)`)를
-//!   `ServerOptions::create_with_security_attributes_raw`로 건다. 지금은 기본 DACL
-//!   (LocalSystem·Administrators·소유자 모든 권한, Everyone 읽기)이다.
+//! - 현재 사용자만 접근하는 보안 설명자(`security::PipeSecurity`, SDDL `D:P(A;;GA;;;<사용자 SID>)`)를
+//!   모든 인스턴스에 `ServerOptions::create_with_security_attributes_raw`로 건다.
 //! - 연결마다: 줄 읽기 작업(1 MiB 상한) + 처리 루프(`handle_line`, `subscribe`면 작업 이벤트 전달).
 
 use std::io;
@@ -15,13 +14,14 @@ use convtool_core::pipe::{encode_line, ServerMessage, MAX_LINE_BYTES, PIPE_NAME}
 use convtool_core::{
     query_formats, BatchTicket, CoreError, FormatsReport, JobEvent, JobId, JobRequest,
 };
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, WriteHalf};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tokio::sync::{broadcast, mpsc};
 
+use super::security::PipeSecurity;
 use super::{handle_line, ConnState, PipeBackend, MENU_COALESCE};
-use crate::events::OpenedBy;
+use crate::events::{route_main_files, MainFilesRoute, OpenedBy, EV_MAIN_OPEN_FILES, WINDOW_MAIN};
 use crate::state::{lock, AppState};
 
 const ERROR_ACCESS_DENIED: i32 = 5;
@@ -29,10 +29,17 @@ const ERROR_PIPE_BUSY: i32 = 231;
 
 /// 첫 파이프 인스턴스를 만든다. tokio 런타임 안에서 불러야 한다.
 pub fn bind_first() -> io::Result<NamedPipeServer> {
-    ServerOptions::new()
-        .first_pipe_instance(true)
-        .reject_remote_clients(true)
-        .create(PIPE_NAME)
+    let mut opts = ServerOptions::new();
+    opts.first_pipe_instance(true).reject_remote_clients(true);
+    create_user_only(&opts)
+}
+
+/// 현재 사용자만 접근하는 파이프 인스턴스를 만든다.
+fn create_user_only(opts: &ServerOptions) -> io::Result<NamedPipeServer> {
+    let mut sec = PipeSecurity::current_user_only()?;
+    // SAFETY: sec는 이 호출이 끝날 때까지 살아 있고, 포인터는 SECURITY_ATTRIBUTES를 가리킨다.
+    // CreateNamedPipeW는 설명자를 복사하므로 호출 뒤 sec를 버려도 된다.
+    unsafe { opts.create_with_security_attributes_raw(PIPE_NAME, sec.as_raw()) }
 }
 
 /// `bind_first` 오류가 "이미 다른 트레이가 실행 중"인지
@@ -44,9 +51,9 @@ pub fn is_already_running(e: &io::Error) -> bool {
 }
 
 fn next_instance() -> io::Result<NamedPipeServer> {
-    ServerOptions::new()
-        .reject_remote_clients(true)
-        .create(PIPE_NAME)
+    let mut opts = ServerOptions::new();
+    opts.reject_remote_clients(true);
+    create_user_only(&opts)
 }
 
 /// 연결을 계속 받는다. 앱이 끝날 때까지 돈다.
@@ -245,12 +252,23 @@ impl PipeBackend for TrayBackend {
     }
 
     fn show_main_window(&self, files: Vec<PathBuf>) -> Result<(), CoreError> {
-        if !files.is_empty() {
-            // TODO(인터페이스): 이미 떠 있는 메인 창에 파일을 넘길 이벤트가 없다.
-            // get_launch_files는 페이지가 처음 뜰 때만 읽으므로, 지금은 다음 로드 때 쓰이도록 쌓아 둔다.
-            lock(&self.app.state::<AppState>().launch_files).extend(files);
-        }
+        let state = self.app.state::<AppState>();
+        // 판정과 쌓기를 launch_files 잠금 안에서 해서 get_launch_files와 엇갈리지 않게 한다.
+        let route = {
+            let mut queued = lock(&state.launch_files);
+            let ready = state.main_ready.load(std::sync::atomic::Ordering::SeqCst);
+            let route = route_main_files(files, ready);
+            if let MainFilesRoute::Queue(f) = &route {
+                queued.extend(f.iter().cloned());
+            }
+            route
+        };
         crate::tray::show_main(&self.app);
+        if let MainFilesRoute::Emit(payload) = route {
+            if let Err(e) = self.app.emit_to(WINDOW_MAIN, EV_MAIN_OPEN_FILES, payload) {
+                tracing::warn!("main:open_files 보내기 실패: {e}");
+            }
+        }
         Ok(())
     }
 }

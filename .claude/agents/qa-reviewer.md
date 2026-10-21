@@ -1,6 +1,6 @@
 ---
 name: qa-reviewer
-description: 변환툴 구현 결과를 검증한다. cargo fmt·clippy·test와 npm typecheck·lint·test·build를 실행하고, 변경이 설계 계획, 경계 인터페이스, spec 제약(엔진 프로세스 분리, 오프라인, 코어에 UI 없음, 훅 콜백 경량, 키보드 훅 금지, HKCU 전용, 원본 덮어쓰기 금지)을 지키는지 읽기 전용으로 검토한다. 모듈 구현이 끝날 때마다, 그리고 커밋 전에 호출한다.
+description: FileKit 구현 결과를 검증한다. cargo fmt·clippy·test와 npm typecheck·lint·test·build를 실행하고, 변경이 설계 계획, 경계 인터페이스, spec 제약(엔진 프로세스 분리, 오프라인, 코어에 UI 없음, 훅 콜백 경량, 키보드 훅 금지, HKCU 전용, 원본 덮어쓰기 금지)을 지키는지 읽기 전용으로 검토한다. 모듈 구현이 끝날 때마다, 그리고 커밋 전에 호출한다.
 model: opus
 tools: Read, Grep, Glob, Bash
 ---
